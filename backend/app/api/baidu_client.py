@@ -16,6 +16,15 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.map.baidu.com"
 
 
+def _scalar(v) -> Optional[float]:
+    """routematrix 元素中的 duration/distance 可能是数字或 {text, value}（部分接口为数组），统一取秒/米数值。"""
+    if isinstance(v, dict):
+        return v.get("value")
+    if isinstance(v, list) and v and isinstance(v[0], dict):
+        return v[0].get("value")
+    return v
+
+
 class BaiduApiError(Exception):
     """百度地图 API 返回的业务错误。status 为接口返回的状态码。"""
 
@@ -122,14 +131,28 @@ class BaiduClient:
     async def route_matrix_walking(
         self, origins: list[tuple[float, float]], destinations: list[tuple[float, float]]
     ) -> dict:
-        """步行批量算路（路线矩阵）：一次请求多组起终点，起终点个数之积 ≤100，由调用方分块。"""
+        """步行批量算路（路线矩阵）：一次请求多组起终点，起终点个数之积 ≤100，由调用方分块。
+
+        真实接口的 result 为元素数组，且 duration/distance 为 {text, value} 对象；
+        这里归一化为与 Mock 一致的 {"elements": [{"status", "duration", "distance"}]} 扁平结构。
+        """
         params = {
             "origins": "|".join(f"{la},{lo}" for la, lo in origins),
             "destinations": "|".join(f"{la},{lo}" for la, lo in destinations),
             "coord_type": "bd09ll",
         }
         data = await self._get("/routematrix/v2/walking", params)
-        return data["result"]
+        raw = data.get("result")
+        if isinstance(raw, dict):  # 兼容 {"elements": [...]} 结构
+            raw = raw.get("elements", [])
+        norm: list[dict] = []
+        for el in raw or []:
+            norm.append({
+                "status": int(el.get("status", 0) or 0),
+                "duration": _scalar(el.get("duration")),
+                "distance": _scalar(el.get("distance")),
+            })
+        return {"elements": norm}
 
     async def batch(self, sub_urls: list[str]) -> list[dict]:
         """批量合并服务：一次最多 20 个子请求（子 URL 不带 ak/output=json）。"""
