@@ -66,9 +66,40 @@
   var CAT_NAMES = { 医疗: "医疗", 教育: "教育", 购物: "购物", 养老: "养老", 文体: "文体", 餐饮: "餐饮", 交通: "交通" };
 
   var map = L.map("map").setView([25.0406, 102.7146], 15);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "© OpenStreetMap contributors"
-  }).addTo(map);
+
+  /* ---------- 底图：多源自动切换 ----------
+   * 国内网络下 openstreetmap/carto/esri 常不可达，实测高德瓦片可稳定加载，
+   * 因此高德优先，其余作为国际网络下的备用源；瓦片加载失败时自动换下一源。 */
+  var TILE_SOURCES = [
+    {
+      url: "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}",
+      options: { maxZoom: 18, subdomains: "1234", attribution: "&copy; 高德地图（演示底图）" }
+    },
+    {
+      url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+      options: { maxZoom: 19, subdomains: "abcd", attribution: "&copy; OpenStreetMap contributors &copy; CARTO" }
+    },
+    {
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      options: { maxZoom: 19, attribution: "Tiles &copy; Esri" }
+    },
+    {
+      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      options: { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }
+    }
+  ];
+  var baseLayer = null, tileErrors = 0;
+  function loadBase(idx) {
+    if (baseLayer) map.removeLayer(baseLayer);
+    if (idx >= TILE_SOURCES.length) return;
+    tileErrors = 0;
+    baseLayer = L.tileLayer(TILE_SOURCES[idx].url, TILE_SOURCES[idx].options).addTo(map);
+    baseLayer.on("tileerror", function () {
+      tileErrors++;
+      if (tileErrors >= 8) loadBase(idx + 1);
+    });
+  }
+  loadBase(0);
 
   var layers = {
     grid: L.layerGroup().addTo(map),
@@ -173,7 +204,7 @@
         var halfLng = (east1 - east0) / 2 / (111320 * Math.cos(lat * Math.PI / 180));
         var halfLat = (north1 - north0) / 2 / 110540;
         var hue = Math.max(0, Math.min(120, 120 - m * 6));
-        var alpha = m <= 15 ? 0.5 : 0.14;
+        var alpha = m <= 15 ? 0.45 : 0.12;
         L.rectangle(
           [[w[1] - halfLat, w[0] - halfLng], [w[1] + halfLat, w[0] + halfLng]],
           { color: "transparent", fillColor: "hsl(" + hue + ",70%,45%)", fillOpacity: alpha, stroke: false, interactive: false }
