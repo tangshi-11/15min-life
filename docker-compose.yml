@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    container_name: life-circle-15min
+    ports:
+      - "8000:8000"
+    environment:
+      BAIDU_AK_SERVER: ${BAIDU_AK_SERVER:-}
+      BAIDU_AK_BROWSER: ${BAIDU_AK_BROWSER:-}
+      FORCE_MOCK: ${FORCE_MOCK:-}
+      BAIDU_QPS: ${BAIDU_QPS:-10}
+      WALK_MINUTES: ${WALK_MINUTES:-15}
+    restart: unless-stopped

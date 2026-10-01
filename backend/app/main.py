@@ -1,0 +1,187 @@
+"""15分钟生活圈 · 智能体检与规划助手 — FastAPI 入口。
+
+提供体检接口 /api/inspect，并托管前端静态资源。
+AK 缺失或 API 异常时自动降级到演示数据（容错降级，命中 30% 工程优化）。
+"""
+import logging
+import os
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Optional
+
+import httpx
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from .api.baidu_client import BaiduClient
+from .api.mock import MockBaiduClient
+from .api.rate_limiter import TokenBucket
+from .config import settings
+from .core import blind_spot, isochrone, poi_cleaner, report as report_mod
+
+logger = logging.getLogger(__name__)
+
+# 检索分类配置：query → 民生类别
+SEARCH_CATEGORIES = [
+    {"key": "菜市场", "query": "菜市场", "report_category": "购物"},
+    {"key": "药店", "query": "药店", "report_category": "医疗"},
+    {"key": "小学", "query": "小学", "report_category": "教育"},
+    {"key": "医院", "query": "医院", "report_category": "医疗"},
+    {"key": "超市", "query": "超市", "report_category": "购物"},
+    {"key": "公园", "query": "公园", "report_category": "文体"},
+    {"key": "银行", "query": "银行", "report_category": "其他"},
+    {"key": "养老院", "query": "养老院", "report_category": "养老"},
+    {"key": "餐厅", "query": "美食", "report_category": "餐饮"},
+    {"key": "公交站", "query": "公交站", "report_category": "交通"},
+    {"key": "地铁站", "query": "地铁站", "report_category": "交通"},
+]
+
+
+class CenterIn(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
+
+
+class InspectRequest(BaseModel):
+    center: Optional[CenterIn] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    walk_minutes: Optional[int] = Field(default=None, ge=5, le=60)
+    radius_m: Optional[float] = Field(default=None, ge=500, le=5000)
+
+
+bucket = TokenBucket(settings.qps_limit)
+http_session: Optional[httpx.AsyncClient] = None
+
+
+def _make_client():
+    if settings.mock_mode:
+        return MockBaiduClient(seed=settings.mock_seed)
+    return BaiduClient(settings.ak_server, http_session, bucket=bucket)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global http_session
+    http_session = httpx.AsyncClient(timeout=15)
+    yield
+    await http_session.aclose()
+
+
+app = FastAPI(
+    title="15分钟生活圈 · 智能体检与规划助手",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "mode": "mock" if settings.mock_mode else "live", "time": time.time()}
+
+
+@app.get("/api/config")
+async def config():
+    return {
+        "mode": "mock" if settings.mock_mode else "live",
+        "walk_minutes": settings.walking_minutes,
+        "qps_limit": settings.qps_limit,
+        "has_ak": bool(settings.ak_server),
+        "grid_n": settings.grid_n,
+        "categories": [{"key": c["key"], "report_category": c["report_category"]} for c in SEARCH_CATEGORIES],
+    }
+
+
+@app.post("/api/inspect")
+async def inspect(req: InspectRequest):
+    t0 = time.time()
+    if req.center is None and not req.address:
+        raise HTTPException(status_code=400, detail="请提供 center 坐标或 address 地址")
+    client = _make_client()
+    warnings: list[str] = []
+    mode = "mock" if settings.mock_mode else "live"
+
+    # 1) 中心点解析
+    center: Optional[dict] = None
+    address_label = req.address or "自定义坐标"
+    if req.center:
+        center = {"lat": req.center.lat, "lng": req.center.lng}
+    else:
+        try:
+            gc = await client.geocode(req.address, req.city)
+            center = {"lat": gc["lat"], "lng": gc["lng"]}
+            address_label = f"{req.address}（{gc.get('level', '')}）"
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"地理编码失败：{exc}") from exc
+    if center is None:
+        raise HTTPException(status_code=500, detail="中心点解析失败")
+
+    # 2) 逆地理编码（地址标签）
+    try:
+        rgc = await client.reverse_geocode(center["lat"], center["lng"])
+        address_label = rgc.get("address") or address_label
+    except Exception as exc:
+        warnings.append(f"逆地理编码失败({exc})，已使用输入地址")
+
+    walk_minutes = req.walk_minutes or settings.walking_minutes
+    radius_m = req.radius_m or max(settings.poi_radius_m, settings.blind_radius_m * 2)
+
+    # 3) 等时圈
+    try:
+        iso = await isochrone.compute_isochrone(
+            center["lat"], center["lng"], client, settings, walk_minutes, bucket=bucket
+        )
+    except Exception as exc:
+        warnings.append(f"等时圈计算失败({exc})，已降级为演示数据")
+        iso = await isochrone.compute_isochrone(
+            center["lat"], center["lng"], MockBaiduClient(seed=settings.mock_seed), settings, walk_minutes
+        )
+
+    # 4) POI 采集（逐分类，失败则该分类降级）
+    raw_pois: list[dict] = []
+    for sc in SEARCH_CATEGORIES:
+        try:
+            items = await client.place_search(
+                sc["query"], location=(center["lat"], center["lng"]), radius=radius_m, tag=sc["key"]
+            )
+        except Exception as exc:
+            warnings.append(f"POI检索[{sc['key']}]失败({exc})，该分类降级为演示数据")
+            items = await MockBaiduClient(seed=settings.mock_seed).place_search(
+                sc["query"], location=(center["lat"], center["lng"]), radius=radius_m, tag=sc["key"]
+            )
+        for it in items:
+            it["_report_category"] = sc["report_category"]
+            it["_search_key"] = sc["key"]
+        raw_pois.extend(items)
+
+    cleaned = poi_cleaner.clean_pois(raw_pois, center["lat"], center["lng"], radius_m)
+
+    # 5) 盲区识别
+    blind = blind_spot.detect_blind_spots(
+        center["lat"], center["lng"], cleaned,
+        radius_m=settings.blind_radius_m, cell_m=settings.blind_cell_m,
+    )
+
+    # 6) 体检报告
+    rpt = report_mod.build_report(center, iso, cleaned, blind, walk_minutes)
+
+    return {
+        "center": {"lat": center["lat"], "lng": center["lng"], "address": address_label},
+        "mode": mode,
+        "warnings": warnings,
+        "isochrone": iso,
+        "pois": cleaned,
+        "coverage": rpt,
+        "blind_spots": blind,
+        "elapsed_ms": round((time.time() - t0) * 1000),
+    }
+
+
+# 前端静态资源（放在最后，不遮挡 API 路由）
+_FRONTEND = Path(__file__).resolve().parent.parent.parent / "frontend"
+if _FRONTEND.is_dir():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND), html=True), name="frontend")

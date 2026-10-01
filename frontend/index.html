@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>15分钟生活圈 · 智能体检与规划助手</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <h1>15分钟生活圈<br>智能体检与规划助手</h1>
+    <div class="mode-badge" id="modeBadge">加载中…</div>
+
+    <label for="addressInput">中心点地址（全国通用）</label>
+    <div class="row">
+      <input id="addressInput" placeholder="输入地址，如：昆明翠湖公园" />
+      <button id="inspectBtn" class="primary">开始体检</button>
+    </div>
+    <div class="samples">
+      <span>示例：</span>
+      <button data-addr="昆明市五华区翠湖公园">翠湖</button>
+      <button data-addr="昆明市呈贡区大学城">呈贡大学城</button>
+      <button data-addr="北京市东城区天安门">北京</button>
+      <button data-addr="上海市黄浦区外滩">上海</button>
+    </div>
+
+    <label for="walkSelect">步行时间</label>
+    <select id="walkSelect">
+      <option value="10">10 分钟</option>
+      <option value="15" selected>15 分钟</option>
+      <option value="20">20 分钟</option>
+    </select>
+    <div class="hint">提示：点击地图任意位置可自定义中心点；红色标记可拖拽。</div>
+
+    <div class="score-box" id="scoreBox" hidden>
+      <div class="score-head">体检综合评分</div>
+      <div class="score-big"><span id="scoreNum">--</span><small>/100</small></div>
+      <div id="blindSummary" class="blind"></div>
+      <div id="statLine" class="stat"></div>
+    </div>
+
+    <div class="charts" id="charts" hidden>
+      <div class="chart-title">分类覆盖评分</div>
+      <div id="radarChart" class="chart"></div>
+      <div class="chart-title">等时圈内设施数量</div>
+      <div id="barChart" class="chart"></div>
+    </div>
+  </aside>
+
+  <main class="map-wrap">
+    <div id="map"></div>
+    <div id="legend"></div>
+    <div id="loading" hidden>正在计算等时圈…（扇区采样 + 批量算路）</div>
+  </main>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
