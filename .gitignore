@@ -22,5 +22,5 @@ ai/.venv/
 ai/models/
 ai/_train_log.txt
 ai/_gen_log.txt
-ai/_t.py
-ai/_t_load.py
+ai/_t*.py
+ai/_t*.txt
