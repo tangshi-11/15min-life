@@ -3,6 +3,7 @@
 提供体检接口 /api/inspect，并托管前端静态资源。
 AK 缺失或 API 异常时自动降级到演示数据（容错降级，命中 30% 工程优化）。
 """
+import json
 import logging
 import os
 import time
@@ -55,6 +56,18 @@ class InspectRequest(BaseModel):
 
 bucket = TokenBucket(settings.qps_limit)
 http_session: Optional[httpx.AsyncClient] = None
+
+AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://127.0.0.1:8010")
+
+# 与 ai/data_gen.py 保持一致的指令文本（保证训练/推理口径一致）
+AI_INSTRUCTION = (
+    "你是一名城市规划与社区生活评估专家。下面是一份“15分钟生活圈”社区体检的"
+    "结构化数据（JSON）：包含综合评分、六类民生设施分项评分与数量、等时圈面积、"
+    "最远可达距离、服务盲区信息。请生成一段约150-220字的中文体检解读，要求："
+    "① 先总评该社区的15分钟生活便利程度；② 指出表现最好的1-2个设施类别和短板；"
+    "③ 针对服务盲区与短板给出1-2条可落地的改善/选址建议；④ 语言专业、客观、口语自然，"
+    "不要罗列所有数字，挑关键数字说。"
+)
 
 
 def _make_client():
@@ -179,6 +192,50 @@ async def inspect(req: InspectRequest):
         "blind_spots": blind,
         "elapsed_ms": round((time.time() - t0) * 1000),
     }
+
+
+def _extract_missing(summary: str) -> list[str]:
+    """从盲区汇总（如“检测到 1 处服务盲区（灰色区域），共 1 个网格单元，缺失设施：菜市场。”）解析缺失设施。"""
+    if "缺失设施" not in summary:
+        return []
+    part = summary.split("缺失设施：", 1)[1]
+    return [x.strip() for x in part.replace("。", "").split("、") if x.strip()]
+
+
+class InterpretRequest(BaseModel):
+    data: dict
+
+
+@app.post("/api/ai/interpret")
+async def ai_interpret(req: InterpretRequest):
+    """把体检结果组装为指令并转发到 AI 解读服务（独立进程 :8010）；AI 服务未启动时优雅降级。"""
+    d = req.data
+    try:
+        feature = {
+            "name": d.get("center", {}).get("address", "自定义坐标"),
+            "overall": d["coverage"]["overall"],
+            "scores": d["coverage"]["scores"],
+            "counts": d["coverage"]["counts"],
+            "in_polygon_pois": d["coverage"]["in_polygon_pois"],
+            "area_km2": d["isochrone"]["stats"]["area_km2"],
+            "max_reach_m": d["isochrone"]["stats"]["max_reach_m"],
+            "cluster_count": d["blind_spots"]["cluster_count"],
+            "blind_cells": len(d["blind_spots"].get("blind_cells", [])),
+            "missing": _extract_missing(d["blind_spots"].get("summary", "")),
+        }
+    except (KeyError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"体检数据结构不完整：{exc}") from exc
+
+    payload = {"instruction": AI_INSTRUCTION, "input": json.dumps(feature, ensure_ascii=False, indent=1)}
+    try:
+        resp = await http_session.post(f"{AI_SERVICE_URL}/api/ai/interpret", json=payload, timeout=60)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI 解读服务未就绪（{exc}）。请先启动 ai/server.py（见 docs/模型训练教程.md）。",
+        ) from exc
 
 
 # 前端静态资源（放在最后，不遮挡 API 路由）

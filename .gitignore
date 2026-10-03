@@ -16,3 +16,11 @@ data/
 logs/
 
 docs/百度地图配额提额申请.md
+
+# AI 模型与训练产物（权重/venv/日志不入库；训练脚本与数据入库，见 docs/模型训练教程.md 可复现）
+ai/.venv/
+ai/models/
+ai/_train_log.txt
+ai/_gen_log.txt
+ai/_t.py
+ai/_t_load.py

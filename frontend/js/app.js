@@ -111,6 +111,7 @@
 
   var centerMarker = null;
   var currentCenter = { lat: 25.0406, lng: 102.7146 }; // BD-09
+  var lastResult = null; // 最近一次体检结果，供 AI 解读使用
 
   function setCenterBd(lat, lng, fly) {
     currentCenter = { lat: lat, lng: lng };
@@ -314,11 +315,50 @@
     document.getElementById("charts").hidden = false;
     if (!radarChart) initCharts();
     renderCharts(cov);
+
+    lastResult = data;
+    var aiBtn = document.getElementById("aiBtn");
+    aiBtn.hidden = false;
+    var aiBox = document.getElementById("aiBox");
+    aiBox.hidden = true;
+    aiBox.textContent = "";
+  }
+
+  /* ---------- AI 解读与选址建议 ---------- */
+  function aiInterpret() {
+    var aiBtn = document.getElementById("aiBtn");
+    var aiBox = document.getElementById("aiBox");
+    if (!lastResult) return;
+    aiBtn.disabled = true;
+    aiBtn.textContent = "AI 解读生成中…";
+    aiBox.hidden = false;
+    aiBox.textContent = "正在调用本地微调模型（Qwen2.5-1.5B）生成解读…";
+    fetch("/api/ai/interpret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: lastResult })
+    }).then(function (r) {
+      return r.json().then(function (body) { return { ok: r.ok, body: body }; });
+    }).then(function (res) {
+      if (res.ok && res.body.interpretation) {
+        aiBox.textContent = res.body.interpretation;
+      } else {
+        var detail = (res.body && res.body.detail) ? res.body.detail : "未知错误";
+        aiBox.textContent = "AI 解读暂不可用：" + detail;
+        aiBox.className = "ai-box";
+      }
+    }).catch(function () {
+      aiBox.textContent = "AI 解读暂不可用：网络错误。";
+    }).finally(function () {
+      aiBtn.disabled = false;
+      aiBtn.textContent = "✨ AI 解读与选址建议";
+    });
   }
 
   /* ---------- 初始化 ---------- */
   function boot() {
     document.getElementById("inspectBtn").addEventListener("click", inspect);
+    document.getElementById("aiBtn").addEventListener("click", aiInterpret);
     document.getElementById("addressInput").addEventListener("keydown", function (e) { if (e.key === "Enter") inspect(); });
     Array.prototype.forEach.call(document.querySelectorAll(".samples button"), function (b) {
       b.addEventListener("click", function () {

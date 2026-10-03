@@ -6,6 +6,9 @@
 并输出可视化「体检报告」。
 
 > 开源 AI 工具赛道 · 百度地图 15 分钟生活圈赛题实现。
+> 内置**自训 AI 能力**：基于魔塔开源模型 Qwen2.5-1.5B-Instruct 做了 QLoRA 领域微调
+> （54 条"体检数据→解读+选址建议"样本，本机 8GB 显存训练约 3 分钟），
+> 点击体检结果区的「✨ AI 解读与选址建议」即可生成自然语言解读（训练复现见 `docs/模型训练教程.md`）。
 
 ## 功能特性（对照评分维度）
 
@@ -13,8 +16,8 @@
 |---|---|
 | 功能正确性与覆盖率 | 地理编码/逆地理编码、POI 检索、步行算路、批量算路调用稳定；地图渲染等时圈热力图；识别 1km 服务盲区；公交/地铁站点检索 |
 | API 深度与工程优化 | 路线矩阵批量测时（分块并发 + 令牌桶限流）；API 异常指数退避重试；POI 缺失/QPS 限流自动降级到演示数据；IDW 空间插值 + Marching Squares 等值线 |
-| 产品交互与体验 | 热力图、雷达图、柱状图、等时圈多边形、灰色区域标注；点击地图/输入地址自定义中心点；全国任意地点可用 |
-| 开源工程规范 | 模块化 FastAPI + 前端静态页；README 详尽；AK 走 `.env` 脱敏；Docker 一键部署；pytest 25 项测试；MIT 许可 |
+| 产品交互与体验 | 热力图、雷达图、柱状图、等时圈多边形、灰色区域标注；点击地图/输入地址自定义中心点；全国任意地点可用；**AI 解读与选址建议** |
+| 开源工程规范 | 模块化 FastAPI + 前端静态页；README 详尽；AK 走 `.env` 脱敏；Docker 一键部署；pytest 28 项测试；**AI 训练脚本/数据集开源**；MIT 许可 |
 
 ## 与官方参考案例的对照
 
@@ -69,6 +72,16 @@ docker compose up --build
 4. 复制 `.env.example` 为 `.env`，填入 `BAIDU_AK_SERVER=<你的AK>`，重启服务即自动切换为实时数据。
 
 > 未配置 AK 时自动进入**演示模式（Mock）**，全流程可跑通，便于评审演示与开发调试。
+
+### 启动 AI 解读服务（可选，自训模型）
+
+```powershell
+# 已训练好的微调模型权重见本机 ai\models\qwen15min-lora（gitignore，不入库）
+ai\.venv\Scripts\python -u ai\server.py        # 独立 AI 服务 :8010
+```
+
+启动后体检结果区会出现「✨ AI 解读与选址建议」按钮；AI 服务未启动时按钮自动提示不可用，**不影响主流程**。
+模型训练与复现步骤见 [`docs/模型训练教程.md`](docs/模型训练教程.md)。
 
 ## 配置说明
 
@@ -160,7 +173,12 @@ docker compose up --build
 │   ├── css/style.css
 │   └── js/app.js
 ├── scripts/                   # 一键启动脚本（bat/sh）与 Docker 脚本
-├── docs/                      # 技术设计文档 / 实测对比报告 / 截图
+├── ai/                        # 自训 AI：训练脚本 / 数据集 / 推理服务（权重 gitignore）
+│   ├── data_gen.py            # 造数据：项目引擎跑 60 个中心点 → 结构化体检 + 解读文本
+│   ├── data/                  # train.json / dev.json / dataset_info.json（开源）
+│   ├── train.py               # QLoRA 微调 Qwen2.5-1.5B（依赖见教程）
+│   └── server.py              # 独立推理服务 :8010，主后端 /api/ai/interpret 代理
+├── docs/                      # 技术设计文档 / 实测对比报告 / 模型训练教程 / 截图
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example               # 环境变量样例（AK 脱敏）
@@ -175,7 +193,7 @@ cd backend
 .venv/bin/python -m pytest -q        # Linux/macOS
 ```
 
-覆盖：坐标转换、等时圈算法、POI 清洗、盲区识别、限流重试、API 端点（25 项全部通过）。
+覆盖：坐标转换、等时圈算法、POI 清洗、盲区识别、限流重试、百度客户端解析、API 端点（28 项全部通过）。
 
 ## 开源许可
 
