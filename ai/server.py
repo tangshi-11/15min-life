@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""15分钟生活圈 · AI 解读推理服务（独立进程，FastAPI :8010）。
+r"""15分钟生活圈 · AI 解读推理服务（独立进程，FastAPI :8010）。
 
 加载微调后的 Qwen2.5-1.5B（QLoRA adapter），把体检结构化结果生成自然语言解读。
 主后端 /api/ai/interpret 会代理到本服务；本服务未启动时主后端优雅降级。
@@ -9,7 +8,6 @@
 """
 import argparse
 import logging
-import os
 import time
 from pathlib import Path
 
@@ -70,7 +68,7 @@ async def health():
 async def interpret(req: InterpretRequest):
     try:
         _load()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("model load failed")
         raise HTTPException(status_code=503, detail=f"AI 模型加载失败：{exc}") from exc
 

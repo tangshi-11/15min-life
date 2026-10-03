@@ -1,5 +1,4 @@
 """坐标转换与距离计算单元测试。"""
-import pytest
 
 from app.core.coords import bd09_to_wgs84, haversine_m, offset_lnglat, wgs84_to_bd09
 

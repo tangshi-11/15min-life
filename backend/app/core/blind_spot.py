@@ -20,7 +20,7 @@ def detect_blind_spots(
     required: list[str] | None = None,
 ) -> dict:
     required = required or REQUIRED_CATEGORIES
-    n = max(3, int(math.ceil(2 * radius_m / cell_m)))
+    n = max(3, math.ceil(2 * radius_m / cell_m))
     half = n * cell_m / 2.0
 
     # 按格索引 POI，加速缓冲查询
@@ -92,7 +92,7 @@ def _cell_rect(center_lng, center_lat, i, j, cell_m, half) -> list[tuple[float, 
 
 def _has_in_radius(grid_index, i, j, lng, lat, radius_m, cat, cell_m) -> bool:
     """检查 (i,j) 格中心 radius_m 缓冲区内是否存在某类 POI。"""
-    span = int(math.ceil(radius_m / cell_m)) + 1
+    span = math.ceil(radius_m / cell_m) + 1
     for dx in range(-span, span + 1):
         for dy in range(-span, span + 1):
             for p in grid_index.get((i + dx, j + dy), []):
@@ -130,7 +130,7 @@ def _cluster_cells(cells: list[dict]) -> list[list[dict]]:
 
 def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
     """Andrew 单调链凸包。"""
-    pts = sorted(set((round(p[0], 6), round(p[1], 6)) for p in points))
+    pts = sorted({(round(p[0], 6), round(p[1], 6)) for p in points})
     if len(pts) <= 2:
         return pts
 

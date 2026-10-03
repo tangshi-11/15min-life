@@ -1,9 +1,7 @@
 """限流与重试单元测试（30% 工程优化评分项）。"""
 import asyncio
-import time
 
 import pytest
-
 from app.api.rate_limiter import TokenBucket, with_retry
 
 
@@ -22,7 +20,6 @@ async def test_token_bucket_limits_rate():
 async def test_token_bucket_refills():
     bucket = TokenBucket(rate=100, capacity=1)
     await bucket.acquire()
-    t0 = time.monotonic()
     wait = await bucket.acquire()
     assert wait > 0.005  # 按 100/s 补充
     await asyncio.sleep(wait + 0.02)

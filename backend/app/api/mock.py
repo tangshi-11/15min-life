@@ -7,7 +7,6 @@
 import hashlib
 import math
 import random
-from typing import Optional
 
 from ..core.coords import haversine_m, offset_lnglat
 
@@ -42,7 +41,7 @@ class MockBaiduClient:
     def __init__(self, seed: int = 42) -> None:
         self.seed = seed
 
-    async def geocode(self, address: str, city: Optional[str] = None) -> dict:
+    async def geocode(self, address: str, city: str | None = None) -> dict:
         if "呈贡" in address or "大学城" in address:
             return {"lng": 102.8488, "lat": 24.8530, "level": "区县", "precise": False}
         if "北京" in address:
@@ -63,10 +62,10 @@ class MockBaiduClient:
         self,
         query: str,
         *,
-        location: Optional[tuple[float, float]] = None,
+        location: tuple[float, float] | None = None,
         radius: float = 2000.0,
-        city: Optional[str] = None,
-        tag: Optional[str] = None,
+        city: str | None = None,
+        tag: str | None = None,
         page_size: int = 20,
         max_pages: int = 5,
     ) -> list[dict]:
@@ -108,11 +107,11 @@ def _mock_seconds(origin: tuple[float, float], dest: tuple[float, float], dist_m
             t += penalty
     h = hashlib.md5(f"{seed}:{round(dest[0], 4)}:{round(dest[1], 4)}".encode()).hexdigest()
     noise = (int(h[:4], 16) % 41 - 20) / 100.0  # -0.2 ~ +0.2 分钟
-    return max(30, int(round(t + noise * 60)))
+    return max(30, round(t + noise * 60))
 
 
 def _mock_pois(
-    center: tuple[float, float], radius: float, query: str, seed: int, tag: Optional[str] = None
+    center: tuple[float, float], radius: float, query: str, seed: int, tag: str | None = None
 ) -> list[dict]:
     # 用稳定哈希（md5）保证跨进程可复现
     qhash = int(hashlib.md5(query.encode("utf-8")).hexdigest()[:8], 16)

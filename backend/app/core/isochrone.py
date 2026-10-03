@@ -10,7 +10,7 @@
 import heapq
 import logging
 import math
-from typing import Any, Optional
+from typing import Any
 
 from .coords import offset_lnglat
 
@@ -65,7 +65,7 @@ def boundary_by_rays(
         for (d, _lat, _lng) in pts:
             el = elements[idx]
             idx += 1
-            dur: Optional[float] = None
+            dur: float | None = None
             if el and el.get("status", 0) == 0 and el.get("duration") is not None:
                 dur = float(el["duration"])
             if dur is not None and dur <= limit_s:
@@ -95,7 +95,7 @@ def idw_minutes_grid(
         for (d, lat, lng) in pts:
             el = elements[idx]
             idx += 1
-            dur: Optional[float] = None
+            dur: float | None = None
             if el and el.get("status", 0) == 0 and el.get("duration") is not None:
                 dur = float(el["duration"])
             e, n = _to_local(center_lng, center_lat, lng, lat)
@@ -240,8 +240,8 @@ async def compute_isochrone(
     center_lng: float,
     client: Any,
     cfg: Any,
-    walk_minutes: Optional[int] = None,
-    bucket: Optional[Any] = None,
+    walk_minutes: int | None = None,
+    bucket: Any | None = None,
 ) -> dict:
     """计算 15 分钟步行等时圈。
 

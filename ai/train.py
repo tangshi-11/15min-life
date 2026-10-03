@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""QLoRA 微调 Qwen2.5-1.5B-Instruct：体检结构化数据 -> 自然语言解读 + 选址建议。
+r"""QLoRA 微调 Qwen2.5-1.5B-Instruct：体检结构化数据 -> 自然语言解读 + 选址建议。
 
 依赖：torch(cu128) transformers peft datasets accelerate bitsandbytes
 运行（ai\.venv）:

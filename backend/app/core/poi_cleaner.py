@@ -1,5 +1,4 @@
 """POI 清洗：去重、异常过滤、民生类别映射（命中 40% 功能正确性）。"""
-from typing import Optional
 
 from .coords import haversine_m
 
@@ -31,7 +30,7 @@ def clean_pois(
     center_lat: float,
     center_lng: float,
     radius_m: float,
-    report_category: Optional[str] = None,
+    report_category: str | None = None,
 ) -> list[dict]:
     """去重(名称+坐标)、过滤异常点(坐标非法/超出半径)、推断民生类别。"""
     seen: set[tuple[str, str]] = set()

@@ -5,7 +5,7 @@
 所有请求统一走令牌桶限流 + 指数退避重试。
 """
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.map.baidu.com"
 
 
-def _scalar(v) -> Optional[float]:
+def _scalar(v) -> float | None:
     """routematrix 元素中的 duration/distance 可能是数字或 {text, value}（部分接口为数组），统一取秒/米数值。"""
     if isinstance(v, dict):
         return v.get("value")
@@ -41,7 +41,7 @@ class BaiduClient:
         self,
         ak: str,
         session: httpx.AsyncClient,
-        bucket: Optional[Any] = None,
+        bucket: Any | None = None,
         timeout: float = 15.0,
     ) -> None:
         self.ak = ak
@@ -63,7 +63,7 @@ class BaiduClient:
 
         return await with_retry(_request, bucket=self.bucket)
 
-    async def geocode(self, address: str, city: Optional[str] = None) -> dict:
+    async def geocode(self, address: str, city: str | None = None) -> dict:
         """地理编码：地址 → 百度坐标(BD-09)。"""
         params: dict[str, Any] = {"address": address}
         if city:
@@ -93,10 +93,10 @@ class BaiduClient:
         self,
         query: str,
         *,
-        location: Optional[tuple[float, float]] = None,
+        location: tuple[float, float] | None = None,
         radius: float = 2000.0,
-        city: Optional[str] = None,
-        tag: Optional[str] = None,
+        city: str | None = None,
+        tag: str | None = None,
         page_size: int = 20,
         max_pages: int = 5,
     ) -> list[dict]:

@@ -1,7 +1,6 @@
 """百度客户端解析单元测试（真实接口结构与 Mock 结构差异的回归保护）。"""
 import pytest
-
-from app.api.baidu_client import _scalar, BaiduClient
+from app.api.baidu_client import BaiduClient, _scalar
 
 
 def test_scalar_normalization():

@@ -2,7 +2,8 @@
 import asyncio
 import logging
 import time
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 class TokenBucket:
     """简单令牌桶：按 rate(个/秒) 匀速补充令牌，capacity 个桶容量。"""
 
-    def __init__(self, rate: float, capacity: Optional[float] = None) -> None:
+    def __init__(self, rate: float, capacity: float | None = None) -> None:
         self.rate = max(0.1, rate)
         self.capacity = capacity or max(10.0, self.rate * 2)
         self._tokens = self.capacity
@@ -34,7 +35,7 @@ class TokenBucket:
 async def with_retry(
     coro_factory: Callable[[], Awaitable[Any]],
     *,
-    bucket: Optional[TokenBucket] = None,
+    bucket: TokenBucket | None = None,
     retries: int = 3,
     base_delay: float = 0.6,
     backoff: float = 2.0,
@@ -44,7 +45,7 @@ async def with_retry(
     coro_factory 是无参协程工厂，每次重试重新发起请求；网络错误统一重试，
     重试耗尽后抛出最后一次异常（由上层降级到演示数据）。
     """
-    last_exc: Optional[Exception] = None
+    last_exc: Exception | None = None
     for attempt in range(retries):
         if bucket is not None:
             wait = await bucket.acquire()
@@ -54,7 +55,7 @@ async def with_retry(
             return await coro_factory()
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001 - 统一按容错降级处理
+        except Exception as exc:
             last_exc = exc
             delay = base_delay * (backoff ** attempt)
             logger.warning("请求失败(第%d次): %s，%.1fs 后重试", attempt + 1, exc, delay)

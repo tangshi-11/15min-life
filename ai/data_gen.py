@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """生成训练数据集：社区体检结构化结果 -> 自然语言解读+选址建议。
 
 用项目自身的 Mock 引擎在多个真实城市坐标上跑完整体检（确定性、快、不耗配额），
@@ -20,11 +19,11 @@ ROOT = Path(__file__).resolve().parent.parent          # E:\上海\15min-life-ci
 BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from app.api.mock import MockBaiduClient                 # noqa: E402
-from app.config import settings                           # noqa: E402
-from app.core import blind_spot, isochrone, poi_cleaner   # noqa: E402
-from app.core import report as report_mod                 # noqa: E402
-from app.main import SEARCH_CATEGORIES                    # noqa: E402
+from app.api.mock import MockBaiduClient
+from app.config import settings
+from app.core import blind_spot, isochrone, poi_cleaner
+from app.core import report as report_mod
+from app.main import SEARCH_CATEGORIES
 
 random.seed(42)
 
@@ -203,7 +202,7 @@ async def main():
         try:
             # 不同中心点使用不同 seed：Mock 的 POI/测时分布随之变化，保证训练数据多样性
             f = await run_one(lat, lng, name, seed=42 + i)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[skip] {name}: {exc}")
             continue
         inp = json.dumps(

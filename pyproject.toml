@@ -1,0 +1,6 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# BLE001：main.py 的降级/重试路径需要捕获所有异常以保证兜底（评审项"容错与降级机制"），故豁免。
+ignore = ["BLE001"]

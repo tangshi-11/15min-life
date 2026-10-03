@@ -9,7 +9,6 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -21,7 +20,8 @@ from .api.baidu_client import BaiduClient
 from .api.mock import MockBaiduClient
 from .api.rate_limiter import TokenBucket
 from .config import settings
-from .core import blind_spot, isochrone, poi_cleaner, report as report_mod
+from .core import blind_spot, isochrone, poi_cleaner
+from .core import report as report_mod
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +47,15 @@ class CenterIn(BaseModel):
 
 
 class InspectRequest(BaseModel):
-    center: Optional[CenterIn] = None
-    address: Optional[str] = None
-    city: Optional[str] = None
-    walk_minutes: Optional[int] = Field(default=None, ge=5, le=60)
-    radius_m: Optional[float] = Field(default=None, ge=500, le=5000)
+    center: CenterIn | None = None
+    address: str | None = None
+    city: str | None = None
+    walk_minutes: int | None = Field(default=None, ge=5, le=60)
+    radius_m: float | None = Field(default=None, ge=500, le=5000)
 
 
 bucket = TokenBucket(settings.qps_limit)
-http_session: Optional[httpx.AsyncClient] = None
+http_session: httpx.AsyncClient | None = None
 
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://127.0.0.1:8010")
 
@@ -119,7 +119,7 @@ async def inspect(req: InspectRequest):
     mode = "mock" if settings.mock_mode else "live"
 
     # 1) 中心点解析
-    center: Optional[dict] = None
+    center: dict | None = None
     address_label = req.address or "自定义坐标"
     if req.center:
         center = {"lat": req.center.lat, "lng": req.center.lng}

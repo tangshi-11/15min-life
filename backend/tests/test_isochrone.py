@@ -2,16 +2,15 @@
 from types import SimpleNamespace
 
 import pytest
-
 from app.api.mock import MockBaiduClient
 from app.core import isochrone
 
 
 def _cfg(**over):
-    base = dict(
-        directions=24, step_m=100, max_radius_m=2000, grid_n=60,
-        matrix_chunk=90, walking_minutes=15, mock_seed=42,
-    )
+    base = {
+        "directions": 24, "step_m": 100, "max_radius_m": 2000, "grid_n": 60,
+        "matrix_chunk": 90, "walking_minutes": 15, "mock_seed": 42,
+    }
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -43,8 +42,6 @@ async def test_isochrone_barrier_shrinks_sector():
     """阻挡角度带方向（河流）的等时圈应明显小于开阔方向。"""
     cfg = _cfg()
     client = MockBaiduClient(seed=42)
-    result = await isochrone.compute_isochrone(25.0406, 102.7146, client, cfg)
-    boundary = dict(result["boundary_polygon"])  # 占位，实际用角度映射
     # 直接复算边界：45°(阻挡带40-75°内) 与 0° 对比
     rays = isochrone.build_rays(25.0406, 102.7146, cfg.directions, cfg.step_m, cfg.max_radius_m)
     dests = isochrone.flat_destinations(rays)
