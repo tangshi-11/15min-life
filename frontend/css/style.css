@@ -88,6 +88,12 @@ button.primary:disabled { background: #93c5fd; cursor: wait; }
 #legend .lg-line { display: flex; align-items: center; gap: 6px; line-height: 1.8; color: #475569; }
 #legend .sw { width: 22px; height: 4px; flex: none; border-radius: 2px; }
 
+.admin-label {
+  background: rgba(124, 58, 237, .9); color: #fff; font-size: 12px; font-weight: 600;
+  padding: 3px 10px; border-radius: 999px; white-space: nowrap; text-align: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+}
+
 #loading {
   position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 1000;
   background: rgba(15,23,42,.85); color: #fff; font-size: 13px; padding: 8px 16px;

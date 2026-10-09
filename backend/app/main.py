@@ -3,8 +3,10 @@
 提供体检接口 /api/inspect，并托管前端静态资源。
 AK 缺失或 API 异常时自动降级到演示数据（容错降级，命中 30% 工程优化）。
 """
+import hashlib
 import json
 import logging
+import math
 import os
 import time
 from contextlib import asynccontextmanager
@@ -133,10 +135,14 @@ async def inspect(req: InspectRequest):
     if center is None:
         raise HTTPException(status_code=500, detail="中心点解析失败")
 
-    # 2) 逆地理编码（地址标签）
+    # 2) 逆地理编码（地址标签 + 所在街道/区县）
+    admin = {"district": "", "town": "", "boundary": []}
     try:
         rgc = await client.reverse_geocode(center["lat"], center["lng"])
         address_label = rgc.get("address") or address_label
+        admin["district"] = rgc.get("district", "")
+        admin["town"] = rgc.get("town", "")
+        admin["boundary"] = _community_boundary(center["lat"], center["lng"], settings.mock_seed)
     except Exception as exc:
         warnings.append(f"逆地理编码失败({exc})，已使用输入地址")
 
@@ -186,12 +192,31 @@ async def inspect(req: InspectRequest):
         "center": {"lat": center["lat"], "lng": center["lng"], "address": address_label},
         "mode": mode,
         "warnings": warnings,
+        "admin": admin,
         "isochrone": iso,
         "pois": cleaned,
         "coverage": rpt,
         "blind_spots": blind,
         "elapsed_ms": round((time.time() - t0) * 1000),
     }
+
+
+def _community_boundary(center_lat: float, center_lng: float, seed: int) -> list[list[float]]:
+    """生成确定性"街道/社区"示意边界（BD-09 多边形，约 1.3~1.9km 半径）。
+
+    百度开放平台不提供街道/社区级行政边界，此处用中心点坐标哈希生成
+    稳定、位置相关的模拟社区轮廓，用于前端色块演示；接入真实行政区划
+    接口后可替换为官方边界。
+    """
+    pts: list[list[float]] = []
+    for k in range(24):
+        ang = math.radians(k * 15.0)
+        h = hashlib.md5(f"cb:{seed}:{round(center_lat, 4)}:{round(center_lng, 4)}:{k}".encode()).hexdigest()
+        r = 1300 + (int(h[:4], 16) % 600)  # 1300 ~ 1900 m
+        dlat = r * math.sin(ang) / 110540.0
+        dlng = r * math.cos(ang) / (111320.0 * math.cos(math.radians(center_lat)))
+        pts.append([round(center_lng + dlng, 6), round(center_lat + dlat, 6)])
+    return pts
 
 
 def _extract_missing(summary: str) -> list[str]:

@@ -106,6 +106,7 @@
     iso: L.layerGroup().addTo(map),
     blind: L.layerGroup().addTo(map),
     pois: L.layerGroup().addTo(map),
+    admin: L.layerGroup().addTo(map),
     center: L.layerGroup().addTo(map)
   };
 
@@ -223,12 +224,27 @@
     }
   }
 
+  function renderAdmin(admin) {
+    if (!admin) return;
+    var poly = admin.boundary || [];
+    if (poly.length < 3) return;
+    var pts = poly.map(function (p) { var w = bd09ToWgs84(p[0], p[1]); return [w[1], w[0]]; });
+    var label = [admin.town, admin.district].filter(Boolean).join(" · ") || "所在街道";
+    L.polygon(pts, {
+      color: "#7c3aed", weight: 2, dashArray: "6 4",
+      fillColor: "#a78bfa", fillOpacity: 0.10, interactive: true
+    }).bindTooltip(label + "（示意边界）", { sticky: true }).addTo(layers.admin);
+    L.marker(pts[0], {
+      icon: L.divIcon({ className: "admin-label", html: label, iconSize: [140, 22], iconAnchor: [70, 11] })
+    }).addTo(layers.admin);
+  }
+
   function renderBlind(blind) {
     (blind.polygons || []).forEach(function (poly) {
       if (poly.length < 3) return;
       var pts = poly.map(function (p) { var w = bd09ToWgs84(p[0], p[1]); return [w[1], w[0]]; });
       L.polygon(pts, {
-        color: "#dc2626", weight: 2, fillColor: "#ef4444", fillOpacity: 0.35,
+        color: "#374151", weight: 2, fillColor: "#6b7280", fillOpacity: 0.4,
         interactive: true
       }).bindTooltip("服务盲区（灰色区域）", { sticky: true }).addTo(layers.blind);
     });
@@ -251,7 +267,8 @@
       html += '<div class="lg-item"><span class="dot" style="background:' + CAT_COLORS[c] + '"></span>' + c + '</div>';
     });
     html += '<div class="lg-line"><span class="sw" style="background:#2563eb"></span>15分钟等时圈</div>';
-    html += '<div class="lg-line"><span class="sw" style="background:#ef4444"></span>服务盲区(灰色区域)</div>';
+    html += '<div class="lg-line"><span class="sw" style="background:#6b7280"></span>服务盲区(灰色区域)</div>';
+    html += '<div class="lg-line"><span class="sw" style="background:#a78bfa"></span>所在街道/社区(示意色块)</div>';
     html += '<div class="lg-item"><span class="dot rect" style="background:hsl(60,70%,45%)"></span>步行热力场(分钟)</div>';
     document.getElementById("legend").innerHTML = html;
   }
@@ -293,6 +310,7 @@
     clearMap();
     setCenterBd(data.center.lat, data.center.lng, true);
 
+    if (data.admin) renderAdmin(data.admin);
     if (data.isochrone.grid) renderGrid(data.isochrone.grid);
     renderIso(data.isochrone);
     renderBlind(data.blind_spots);
@@ -315,6 +333,10 @@
     document.getElementById("charts").hidden = false;
     if (!radarChart) initCharts();
     renderCharts(cov);
+
+    var admin = data.admin || {};
+    var adminTxt = [admin.town, admin.district].filter(Boolean).join(" · ");
+    document.getElementById("adminLine").textContent = adminTxt ? "所在街道：" + adminTxt : "";
 
     lastResult = data;
     var aiBtn = document.getElementById("aiBtn");

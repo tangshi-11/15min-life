@@ -55,6 +55,7 @@ class MockBaiduClient:
             "address": "云南省昆明市五华区翠湖公园附近",
             "city": "昆明市",
             "district": "五华区",
+            "town": "华山街道",
             "business": "翠湖",
         }
 
