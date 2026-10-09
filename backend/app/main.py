@@ -57,6 +57,8 @@ class InspectRequest(BaseModel):
 
 
 bucket = TokenBucket(settings.qps_limit)
+# routematrix 并发配额极严（默认约 1-2 并发），独立慢桶防 401 并发超限
+matrix_bucket = TokenBucket(1.0)
 http_session: httpx.AsyncClient | None = None
 
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://127.0.0.1:8010")
@@ -75,7 +77,7 @@ AI_INSTRUCTION = (
 def _make_client():
     if settings.mock_mode:
         return MockBaiduClient(seed=settings.mock_seed)
-    return BaiduClient(settings.ak_server, http_session, bucket=bucket)
+    return BaiduClient(settings.ak_server, http_session, bucket=bucket, matrix_bucket=matrix_bucket)
 
 
 @asynccontextmanager

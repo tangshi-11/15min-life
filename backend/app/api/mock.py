@@ -12,9 +12,6 @@ from ..core.coords import haversine_m, offset_lnglat
 
 MOCK_CENTER = {"lng": 102.7146, "lat": 25.0406}  # 昆明市五华区翠湖片区
 
-# 模拟路网阻挡：角度带(度, 度) → 额外耗时(秒)
-BARRIERS = [(40.0, 75.0, 900.0), (200.0, 230.0, 480.0)]
-
 # 演示 POI 生成计划：名称 / 数量 / 分布密度
 POI_PLAN = [
     ("菜市场", 12, 0.006),
@@ -104,16 +101,31 @@ class MockBaiduClient:
         return out
 
 
+def _barrier_bearing(origin: tuple[float, float], seed: int) -> float:
+    """由中心点坐标确定性派生的首个阻挡方向（度），用于测试引用。"""
+    h = hashlib.md5(f"bar:{seed}:{round(origin[0], 4)}:{round(origin[1], 4)}".encode()).hexdigest()
+    return float(int(h[:4], 16) % 360)
+
+
 def _mock_seconds(origin: tuple[float, float], dest: tuple[float, float], dist_m: float, seed: int) -> int:
-    """模拟步行耗时：基础速度 1.3m/s + 路网阻挡 + 确定性噪声。"""
+    """模拟步行耗时：基础速度 1.3m/s + 位置相关路网阻挡 + 确定性噪声。
+
+    阻挡角度带由**中心点坐标哈希**派生（不同位置 → 不同方向的河/高架/施工，
+    等时圈形态随位置明显变化；同一坐标结果可复现）。
+    """
     speed = 1.3
     t = dist_m / speed
     ang = math.degrees(math.atan2(dest[1] - origin[1], dest[0] - origin[0])) % 360.0
-    for lo, hi, penalty in BARRIERS:
-        if lo <= ang <= hi:
+    h = hashlib.md5(f"bar:{seed}:{round(origin[0], 4)}:{round(origin[1], 4)}".encode()).hexdigest()
+    for k in range(2):
+        base = int(h[4 * k:4 * k + 4], 16) % 360
+        width = 25 + int(h[4 * k + 8:4 * k + 12], 16) % 45      # 25 ~ 70°
+        penalty = 300 + int(h[4 * k + 12:4 * k + 16], 16) % 600  # 300 ~ 900 秒
+        delta = (ang - base) % 360
+        if delta <= width or delta >= 360 - width:
             t += penalty
-    h = hashlib.md5(f"{seed}:{round(dest[0], 4)}:{round(dest[1], 4)}".encode()).hexdigest()
-    noise = (int(h[:4], 16) % 41 - 20) / 100.0  # -0.2 ~ +0.2 分钟
+    h2 = hashlib.md5(f"{seed}:{round(dest[0], 4)}:{round(dest[1], 4)}".encode()).hexdigest()
+    noise = (int(h2[:4], 16) % 41 - 20) / 100.0  # -0.2 ~ +0.2 分钟
     return max(30, round(t + noise * 60))
 
 

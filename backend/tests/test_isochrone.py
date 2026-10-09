@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 
 import pytest
+from app.api import mock as mock_mod
 from app.api.mock import MockBaiduClient
 from app.core import isochrone
 
@@ -39,15 +40,26 @@ async def test_isochrone_boundary_within_bbox():
 
 @pytest.mark.asyncio
 async def test_isochrone_barrier_shrinks_sector():
-    """阻挡角度带方向（河流）的等时圈应明显小于开阔方向。"""
-    cfg = _cfg()
-    client = MockBaiduClient(seed=42)
-    # 直接复算边界：45°(阻挡带40-75°内) 与 0° 对比
-    rays = isochrone.build_rays(25.0406, 102.7146, cfg.directions, cfg.step_m, cfg.max_radius_m)
-    dests = isochrone.flat_destinations(rays)
-    elements = []
-    for i in range(0, len(dests), cfg.matrix_chunk):
-        chunk = dests[i:i + cfg.matrix_chunk]
-        elements.extend((await client.route_matrix_walking([(25.0406, 102.7146)], chunk))["elements"])
-    bounds = dict(isochrone.boundary_by_rays(rays, elements, 900, cfg.step_m, cfg.max_radius_m))
-    assert bounds[45.0] < bounds[0.0] * 0.9
+    """阻挡角度带方向（河流）的耗时显著大于开阔方向 → 等时圈必然收缩。"""
+    o = (25.0406, 102.7146)
+    base = mock_mod._barrier_bearing(o, 42)
+    import math
+
+    def pt(ang: float, r: float = 900) -> tuple[float, float]:
+        return (
+            o[0] + r * math.cos(math.radians(ang)) / 110540.0,
+            o[1] + r * math.sin(math.radians(ang)) / (111320.0 * math.cos(math.radians(o[0]))),
+        )
+
+    t_in = mock_mod._mock_seconds(o, pt(base), 900, 42)
+    t_out = mock_mod._mock_seconds(o, pt((base + 90) % 360), 900, 42)
+    assert t_in > t_out + 200, f"阻挡方向 {t_in}s 应明显慢于开阔方向 {t_out}s"
+    assert t_in > 900, "阻挡方向应超出 15 分钟阈值（保证边界收缩）"
+
+
+def test_mock_barrier_position_dependent():
+    """不同中心点 → 不同阻挡方向（等时圈形态随位置变化，同点可复现）。"""
+    o1, o2 = (25.0406, 102.7146), (24.8530, 102.8488)
+    b1, b2 = mock_mod._barrier_bearing(o1, 42), mock_mod._barrier_bearing(o2, 42)
+    assert b1 != b2
+    assert mock_mod._barrier_bearing(o1, 42) == b1  # 确定性

@@ -42,14 +42,24 @@ class BaiduClient:
         ak: str,
         session: httpx.AsyncClient,
         bucket: Any | None = None,
+        matrix_bucket: Any | None = None,
         timeout: float = 15.0,
     ) -> None:
         self.ak = ak
         self.session = session
         self.bucket = bucket
+        self.matrix_bucket = matrix_bucket
         self.timeout = timeout
 
-    async def _get(self, path: str, params: dict) -> dict:
+    async def _get(
+        self,
+        path: str,
+        params: dict,
+        *,
+        bucket: Any | None = None,
+        retries: int = 3,
+        base_delay: float = 0.6,
+    ) -> dict:
         full = {**params, "ak": self.ak, "output": "json"}
 
         async def _request() -> dict:
@@ -61,7 +71,7 @@ class BaiduClient:
                 raise BaiduApiError(status, str(data.get("message", "")))
             return data
 
-        return await with_retry(_request, bucket=self.bucket)
+        return await with_retry(_request, bucket=bucket or self.bucket, retries=retries, base_delay=base_delay)
 
     async def geocode(self, address: str, city: str | None = None) -> dict:
         """地理编码：地址 → 百度坐标(BD-09)。"""
@@ -86,6 +96,7 @@ class BaiduClient:
             "address": r.get("formatted_address", ""),
             "city": ac.get("city", ""),
             "district": ac.get("district", ""),
+            "town": ac.get("township") or ac.get("street", "") or "",
             "business": r.get("business", ""),
         }
 
@@ -141,7 +152,10 @@ class BaiduClient:
             "destinations": "|".join(f"{la},{lo}" for la, lo in destinations),
             "coord_type": "bd09ll",
         }
-        data = await self._get("/routematrix/v2/walking", params)
+        # routematrix 并发配额极严（默认约 1-2 并发），用独立慢桶 + 更长重试
+        data = await self._get(
+            "/routematrix/v2/walking", params, bucket=self.matrix_bucket, retries=5, base_delay=1.2
+        )
         raw = data.get("result")
         if isinstance(raw, dict):  # 兼容 {"elements": [...]} 结构
             raw = raw.get("elements", [])
