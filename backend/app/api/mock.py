@@ -34,6 +34,9 @@ POI_PLAN = [
 SPARSE_QUADRANT = (0.0, 135.0)
 SPARSE_TARGETS = {"菜市场", "药店", "小学"}
 
+# 演示街道（昆明市五华区），按坐标确定性选择
+TOWNS = ["华山街道", "护国街道", "大观街道", "龙翔街道", "丰宁街道", "莲华街道", "红云街道", "普吉街道"]
+
 
 class MockBaiduClient:
     """与 BaiduClient 同接口的演示实现，接口契约一致，便于无缝切换。"""
@@ -51,12 +54,15 @@ class MockBaiduClient:
         return {**MOCK_CENTER, "level": "兴趣点", "precise": False}
 
     async def reverse_geocode(self, lat: float, lng: float) -> dict:
+        # 按坐标确定性返回所在街道（演示换中心点时街道名/色块随之变化）
+        h = hashlib.md5(f"rg:{round(lat, 4)}:{round(lng, 4)}".encode()).hexdigest()
+        town = TOWNS[int(h[:4], 16) % len(TOWNS)]
         return {
-            "address": "云南省昆明市五华区翠湖公园附近",
+            "address": f"云南省昆明市五华区{town}附近",
             "city": "昆明市",
             "district": "五华区",
-            "town": "华山街道",
-            "business": "翠湖",
+            "town": town,
+            "business": town,
         }
 
     async def place_search(
