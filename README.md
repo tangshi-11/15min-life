@@ -84,8 +84,20 @@ docker compose up --build
 ai\.venv\Scripts\python -u ai\server.py        # 独立 AI 服务 :8010
 ```
 
+**Docker 方式（可选加分模块，需先准备好模型目录 `ai/models/`）**：
+
+```bash
+docker compose --profile ai up -d --build      # 同时起 app(:8000) 与 ai(:8001)
+```
+
+> - AI 服务为**可选加分模块**：默认 `docker compose up` 不启动它，不影响主流程一键演示；
+>   未启动时前端「AI 解读」按钮自动降级提示「暂不可用」。
+> - 模型（Qwen2.5-1.5B-Instruct ≈3.1GB + QLoRA adapter）按
+>   [`docs/模型训练教程.md`](docs/模型训练教程.md) 准备后放入 `ai/models/`（已在 .gitignore 中，不入库）；
+>   Docker 版推理使用 **CPU/fp32**（`ai/Dockerfile`），无 GPU 也能跑（生成约 15-40s）。
+> - 容器内主后端通过 `AI_SERVICE_URL=http://ai:8001` 代理到 AI 服务（可由 .env 覆盖）。
+
 启动后体检结果区会出现「✨ AI 解读与选址建议」按钮；AI 服务未启动时按钮自动提示不可用，**不影响主流程**。
-模型训练与复现步骤见 [`docs/模型训练教程.md`](docs/模型训练教程.md)。
 
 ## 配置说明
 

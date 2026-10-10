@@ -25,6 +25,7 @@ app = FastAPI(title="15min-life AI 解读服务", version="1.0.0")
 
 # 懒加载：进程启动后才挂载（保持 /api/ai/health 可用）
 _model = {"pipe": None, "tokenizer": None, "ok": False}
+_DTYPE = "bf16"  # 推理精度：bf16(GPU, 默认) / fp32(CPU 容器用)；由 --dtype 覆盖
 
 
 class InterpretRequest(BaseModel):
@@ -44,7 +45,7 @@ def _load():
     # AutoPeftModelForCausalLM 直接加载微调产物目录（含 adapter 与合并后的 config）
     pipe = AutoPeftModelForCausalLM.from_pretrained(
         str(ADAPTER_DIR),
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16 if _DTYPE == "bf16" else torch.float32,
         device_map="auto",
         trust_remote_code=True,
     )
@@ -97,5 +98,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8010)
+    parser.add_argument("--dtype", default="bf16", choices=["bf16", "fp32"],
+                        help="推理精度：bf16(GPU,默认) / fp32(CPU 容器推理)")
     args = parser.parse_args()
+    _DTYPE = args.dtype
     uvicorn.run(app, host=args.host, port=args.port)

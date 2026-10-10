@@ -10,4 +10,19 @@ services:
       FORCE_MOCK: ${FORCE_MOCK:-}
       BAIDU_QPS: ${BAIDU_QPS:-10}
       WALK_MINUTES: ${WALK_MINUTES:-15}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai:8001}
+    restart: unless-stopped
+
+  # 可选加分模块：AI 体检解读（模型约 3GB，需按 docs/模型训练教程.md 准备后挂载）
+  # 启用：docker compose --profile ai up -d（默认不启动，不影响主流程一键演示）
+  ai:
+    build:
+      context: .
+      dockerfile: ai/Dockerfile
+    container_name: life-circle-15min-ai
+    profiles: ["ai"]
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./ai/models:/app/models
     restart: unless-stopped
