@@ -17,7 +17,7 @@
 | 功能正确性与覆盖率 | 地理编码/逆地理编码、POI 检索、步行算路、批量算路调用稳定；地图渲染等时圈热力图；识别 1km 服务盲区；公交/地铁站点检索 |
 | API 深度与工程优化 | 路线矩阵批量测时（分块并发 + 令牌桶限流）；API 异常指数退避重试；POI 缺失/QPS 限流自动降级到演示数据；IDW 空间插值 + Marching Squares 等值线 |
 | 产品交互与体验 | 热力图、雷达图、柱状图、等时圈多边形、灰色区域标注；点击地图/输入地址自定义中心点；全国任意地点可用；**AI 解读与选址建议** |
-| 开源工程规范 | 模块化 FastAPI + 前端静态页；README 详尽；AK 走 `.env` 脱敏；Docker 一键部署；pytest 30 项测试；**AI 训练脚本/数据集开源**；MIT 许可 |
+| 开源工程规范 | 模块化 FastAPI + 前端静态页；README 详尽；AK 走 `.env` 脱敏；Docker 一键部署；pytest 34 项测试；**AI 训练脚本/数据集开源**；MIT 许可 |
 
 ## 与官方参考案例的对照
 
@@ -227,7 +227,7 @@ flowchart TB
 │   │       ├── poi_cleaner.py
 │   │       ├── blind_spot.py
 │   │       └── report.py
-│   ├── tests/                 # pytest 单元测试（30 项）
+│   ├── tests/                 # pytest 单元测试（34 项）
 │   ├── requirements.txt
 │   └── run.py
 ├── frontend/                  # 静态前端（Leaflet + ECharts，由 FastAPI 托管）
@@ -255,7 +255,7 @@ cd backend
 .venv/bin/python -m pytest -q        # Linux/macOS
 ```
 
-覆盖：坐标转换、等时圈算法（含网格硬边界修正回归）、POI 清洗、盲区识别、限流重试、百度客户端解析、API 端点（30 项全部通过）。
+覆盖：坐标转换、等时圈算法（含网格硬边界修正回归）、单点复核（方案B）、POI 清洗、盲区识别、限流重试、百度客户端解析、API 端点（34 项全部通过）。
 
 ## 开源许可
 
