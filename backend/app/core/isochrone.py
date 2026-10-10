@@ -314,8 +314,8 @@ async def refine_boundaries(
                         bd = nd
                     else:
                         break
-        except Exception:
-            pass  # 复核失败：保持原边界
+        except Exception as exc:
+            logger.warning("方向 %.1f° 单点复核失败，保持原边界：%s", ang, exc)  # 安全降级
         out.append((ang, bd))
     return out
 
