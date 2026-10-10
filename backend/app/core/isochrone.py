@@ -55,16 +55,20 @@ def flat_destinations(rays) -> list[tuple[float, float]]:
 def boundary_by_rays(
     rays, elements, limit_s: float, step_m: float, max_radius_m: float
 ) -> list[tuple[float, float]]:
-    """每方向求最远可达边界距离（米），相邻测点间线性插值细化。返回 [(角度, 距离)]。"""
+    """每方向求最远可达边界距离（米），相邻测点间线性插值细化。返回 [(角度, 距离)]。
+
+    注意：elements 为完整 480 点（每方向全部采样点，与 flat_destinations 同序）。
+    这里按 `方向序号 * 每方向点数 + 步序` 直接定位元素，避免中途 break 导致 idx 错位。
+    """
+    n_steps = len(rays[0][1]) if rays else 0
     boundaries: list[tuple[float, float]] = []
-    idx = 0
-    for ang, pts in rays:
+    for ray_idx, (ang, pts) in enumerate(rays):
         prev_d, prev_dur = 0.0, 0.0
         bd = step_m * 0.5
         crossed = False
-        for (d, _lat, _lng) in pts:
-            el = elements[idx]
-            idx += 1
+        base = ray_idx * n_steps
+        for k, (d, _lat, _lng) in enumerate(pts):
+            el = elements[base + k]
             dur: float | None = None
             if el and el.get("status", 0) == 0 and el.get("duration") is not None:
                 dur = float(el["duration"])

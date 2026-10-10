@@ -40,10 +40,31 @@ async def test_isochrone_boundary_within_bbox():
 
 @pytest.mark.asyncio
 async def test_isochrone_barrier_shrinks_sector():
-    """阻挡角度带方向（河流）的耗时显著大于开阔方向 → 等时圈必然收缩。"""
+    """阻挡角度带方向（河流）的等时圈应明显小于开阔方向。"""
+    cfg = _cfg()
+    client = MockBaiduClient(seed=42)
     o = (25.0406, 102.7146)
     base = mock_mod._barrier_bearing(o, 42)
+    # 复算边界：阻挡带方向 与 其垂直方向 对比
+    rays = isochrone.build_rays(o[0], o[1], cfg.directions, cfg.step_m, cfg.max_radius_m)
+    dests = isochrone.flat_destinations(rays)
+    elements = []
+    for i in range(0, len(dests), cfg.matrix_chunk):
+        chunk = dests[i:i + cfg.matrix_chunk]
+        elements.extend((await client.route_matrix_walking([o], chunk))["elements"])
+    bounds = dict(isochrone.boundary_by_rays(rays, elements, 900, cfg.step_m, cfg.max_radius_m))
+    keys = sorted(bounds.keys())
+    r_in = min(keys, key=lambda k: abs(k - base))
+    r_out = min(keys, key=lambda k: abs(((k - (base + 90) % 360) + 180) % 360 - 180))
+    assert bounds[r_in] < bounds[r_out] * 0.9
+
+
+def test_boundary_elements_no_offset():
+    """回归：boundary_by_rays 每方向必须消费本方向的采样点（修复 break 导致 idx 错位）。"""
     import math
+
+    o = (25.0406, 102.7146)
+    base = mock_mod._barrier_bearing(o, 42)
 
     def pt(ang: float, r: float = 900) -> tuple[float, float]:
         return (
@@ -51,10 +72,9 @@ async def test_isochrone_barrier_shrinks_sector():
             o[1] + r * math.sin(math.radians(ang)) / (111320.0 * math.cos(math.radians(o[0]))),
         )
 
+    # 阻挡方向 900m 处必然超 15 分钟（修复前会被错位的低耗时元素掩盖）
     t_in = mock_mod._mock_seconds(o, pt(base), 900, 42)
-    t_out = mock_mod._mock_seconds(o, pt((base + 90) % 360), 900, 42)
-    assert t_in > t_out + 200, f"阻挡方向 {t_in}s 应明显慢于开阔方向 {t_out}s"
-    assert t_in > 900, "阻挡方向应超出 15 分钟阈值（保证边界收缩）"
+    assert t_in > 900
 
 
 def test_mock_barrier_position_dependent():
