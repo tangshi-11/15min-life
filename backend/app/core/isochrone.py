@@ -266,6 +266,28 @@ async def compute_isochrone(
     boundaries = boundary_by_rays(rays, elements, limit_s, cfg.step_m, cfg.max_radius_m)
     grid_min = idw_minutes_grid(center_lat, center_lng, rays, elements, limit_s, cfg.max_radius_m, cfg.grid_n)
 
+    # —— 网格硬边界修正 ——
+    # IDW 插值在稀疏方向（水域/障碍）会把采样点之间的空白“填平”，导致等时圈凸出到
+    # 采样真实边界之外（典型：跨河/跨湖假覆盖）。这里用每个方向的真实可达边界做硬约束：
+    # 任何格点距中心超过其所在方向的真实边界距离 → 强制标记为超时。
+    # （注：routematrix 对水域点本身返回近似直线耗时，属于百度批量算路口径，
+    #   此修正负责消除“插值凸出”这一层误差。）
+    bd_map = {ang: bd for ang, bd in boundaries}
+    ang_list = sorted(bd_map.keys())
+    half = cfg.max_radius_m
+    n_side = cfg.grid_n
+    for j in range(n_side):
+        for i in range(n_side):
+            e = (i / (n_side - 1) * 2.0 - 1.0) * half       # 东向米
+            nn = (1.0 - j / (n_side - 1) * 2.0) * half      # 北向米
+            dist = (e * e + nn * nn) ** 0.5
+            if dist < 60.0:
+                continue
+            ang = math.degrees(math.atan2(e, nn)) % 360.0
+            bd = bd_map[min(ang_list, key=lambda a: abs(((a - ang) + 180) % 360 - 180))]
+            if dist > bd + 1e-6:
+                grid_min[j][i] = limit_s / 60.0 + 1.0
+
     # 等值线 → 经纬度多边形，取面积最大者
     polygons = marching_squares(grid_min, limit_s / 60.0)
     contour = None
