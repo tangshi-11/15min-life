@@ -133,13 +133,22 @@
     if (fly) map.flyTo([w[1], w[0]], Math.max(map.getZoom(), 15), { duration: 0.8 });
   }
 
-  /* 拖拽地图保护：Leaflet 快速/小幅拖动可能误触发 click，避免中心点被“浏览”操作篡改 */
-  var mapDragging = false;
-  map.on("dragstart", function () { mapDragging = true; });
-  map.on("moveend", function () { setTimeout(function () { mapDragging = false; }, 250); });
-
+  /* 地图交互：按住拖动 = 浏览地图；长按(≥500ms)不动 = 选点；快速单击 = 不做任何事
+     Leaflet 原生会在拖拽后抑制 click，故这里只需区分“快速单击”与“长按选点” */
+  var downAt = null, downPos = null;
+  map.on("mousedown", function (e) {
+    if (e.originalEvent && e.originalEvent.button !== 0) return; // 仅左键
+    downAt = Date.now();
+    downPos = { x: e.originalEvent.clientX, y: e.originalEvent.clientY };
+  });
   map.on("click", function (e) {
-    if (mapDragging) return; // 拖拽结束的误触 click 直接忽略
+    if (downAt === null) return;
+    var dt = Date.now() - downAt;
+    var dx = e.originalEvent ? e.originalEvent.clientX - downPos.x : 0;
+    var dy = e.originalEvent ? e.originalEvent.clientY - downPos.y : 0;
+    downAt = null;
+    if (dt < 500 && Math.abs(dx) + Math.abs(dy) < 6) return; // 快速单击：忽略
+    // 长按（≥0.5s）选点
     var b = wgs84ToBd09(e.latlng.lng, e.latlng.lat);
     setCenterBd(b[1], b[0], false);
     document.getElementById("addressInput").value = "自定义坐标";
