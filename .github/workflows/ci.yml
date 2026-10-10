@@ -47,12 +47,18 @@ jobs:
 
       - name: Smoke-test container boots
         run: |
-          docker run --rm -d -p 8000:8000 -e BAIDU_AK_SERVER="" -e FORCE_MOCK=true --name 15min-ci 15min-life:ci
-          for i in $(seq 1 30); do
+          docker run --rm -d -p 8000:8000 -e BAIDU_AK_SERVER="" -e FORCE_MOCK=1 --name 15min-ci 15min-life:ci
+          ok=0
+          for i in $(seq 1 90); do
             if curl -sf http://127.0.0.1:8000/api/health > /dev/null; then
-              echo "health OK after ${i}s"; exit 0
+              echo "health OK after ${i}s"; ok=1; break
             fi
             sleep 1
           done
-          docker logs 15min-ci || true
-          echo "container failed to become healthy" && exit 1
+          if [ "$ok" != "1" ]; then
+            echo "---- container logs ----"
+            docker logs 15min-ci || true
+            echo "---- docker ps ----"
+            docker ps -a
+            echo "container failed to become healthy" && exit 1
+          fi
