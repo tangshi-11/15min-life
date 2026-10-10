@@ -17,7 +17,7 @@
 | 功能正确性与覆盖率 | 地理编码/逆地理编码、POI 检索、步行算路、批量算路调用稳定；地图渲染等时圈热力图；识别 1km 服务盲区；公交/地铁站点检索 |
 | API 深度与工程优化 | 路线矩阵批量测时（分块并发 + 令牌桶限流）；API 异常指数退避重试；POI 缺失/QPS 限流自动降级到演示数据；IDW 空间插值 + Marching Squares 等值线 |
 | 产品交互与体验 | 热力图、雷达图、柱状图、等时圈多边形、灰色区域标注；点击地图/输入地址自定义中心点；全国任意地点可用；**AI 解读与选址建议** |
-| 开源工程规范 | 模块化 FastAPI + 前端静态页；README 详尽；AK 走 `.env` 脱敏；Docker 一键部署；pytest 29 项测试；**AI 训练脚本/数据集开源**；MIT 许可 |
+| 开源工程规范 | 模块化 FastAPI + 前端静态页；README 详尽；AK 走 `.env` 脱敏；Docker 一键部署；pytest 30 项测试；**AI 训练脚本/数据集开源**；MIT 许可 |
 
 ## 与官方参考案例的对照
 
@@ -31,13 +31,16 @@
 | ② 结论 | 设施清单（按距离排序） | **覆盖率量化 + 服务盲区判定**（等时圈内统计 + 1km 网格盲区识别） |
 | ③ 呈现 | 单点查看 | **可视化体检报告**（评分 + 雷达/柱状图 + 地图渲染，可交互自定义中心点） |
 
-## 效果演示
+## 效果演示（实时模式 · 百度 API 真实数据）
 
-![演示：昆明翠湖（演示数据）](docs/screenshots/demo_昆明翠湖_mock.png)
+![演示：昆明翠湖（实时数据）](docs/screenshots/demo_昆明翠湖_live.png)
 
-- 综合评分 **95/100**（六类设施均达标，盲区扣分）
-- 等时圈面积 **3.628 km²**，最远可达 **1169 m**，圈内设施 **87 个**（含公交/地铁站点 11 个）
-- 识别 **1 处服务盲区**（东北偏东方向，7 个网格单元，缺小学/药店/菜市场）
+昆明市五华区翠湖公园（`25.0406, 102.7146`，15 分钟步行）：
+
+- 综合评分 **80/100**（医疗/餐饮/交通覆盖良好，购物/文体偏少扣分）
+- 等时圈面积 **1.73 km²**，最远可达 **929.5 m**（48 方向采样 + 网格硬边界修正）
+- 圈内六类民生设施：医疗 67 · 餐饮 49 · 交通 32 · 购物 17 · 教育 11 · 文体 5（全量 POI 817 个）
+- 自动识别 **1 处服务盲区**（灰色区域），并按"必备设施缺失"规则给出扣分与建议
 
 ## 快速开始
 
@@ -92,11 +95,67 @@ ai\.venv\Scripts\python -u ai\server.py        # 独立 AI 服务 :8010
 | `FORCE_MOCK` | 强制演示模式 | 空（自动） |
 | `BAIDU_QPS` | 百度接口 QPS 限制 | 10 |
 | `WALK_MINUTES` | 步行体检时间（分钟） | 15 |
-| `SAMPLE_DIRECTIONS` | 扇区采样方向数 | 24 |
+| `SAMPLE_DIRECTIONS` | 扇区采样方向数 | 48 |
 | `SAMPLE_STEP_M` | 采样步长（米） | 100 |
 | `MAX_RADIUS_M` | 最大采样半径（米） | 2000 |
 | `GRID_N` | IDW 插值网格分辨率 | 60 |
 | `POI_RADIUS_M` / `BLIND_RADIUS_M` / `BLIND_CELL_M` | POI 检索半径 / 盲区缓冲半径 / 网格边长（米） | 2500 / 1000 / 200 |
+
+## 系统架构
+
+```mermaid
+flowchart TB
+    subgraph Browser["浏览器（静态前端）"]
+        FE["Leaflet 地图 + ECharts 图表<br/>等时圈 · POI · 盲区 · 体检报告"]
+    end
+    subgraph Backend["FastAPI 后端 :8000"]
+        API["/api/inspect 体检编排"]
+        BC["baidu_client<br/>地理编码 / POI / 路线矩阵<br/>令牌桶限流 + 指数退避"]
+        MOCK["Mock 演示数据（降级）"]
+        ISO["等时圈引擎<br/>48方向采样→批量测时→IDW插值→Marching Squares→网格硬边界修正"]
+        PC["POI 清洗 / 盲区识别 / 报告评分"]
+        AI_PROXY["/api/ai/interpret 代理"]
+    end
+    subgraph AIServer["AI 推理服务 :8010"]
+        LM["Qwen2.5-1.5B-Instruct<br/>+ QLoRA 领域微调（LoRA 72MB）"]
+    end
+    BD["百度地图开放平台<br/>地理编码 / 逆地理 / POI / 路线矩阵"]
+    FE --> API
+    API --> BC --> BD
+    API --> ISO
+    API --> PC
+    BC -. 失败 / 限流 .-> MOCK
+    FE --> AI_PROXY --> LM
+```
+
+- **真实数据链路**：浏览器 → FastAPI → 百度开放平台（测时/POI/编码），全程令牌桶限流 + 指数退避，配额不足自动降级 Mock 并明示警告。
+- **AI 链路**：体检结果通过 `/api/ai/interpret` 代理到本地推理服务，生成自然语言解读与选址建议（详情见下节）。
+
+## 自训 AI：Qwen2.5-1.5B + QLoRA 领域微调
+
+本项目自带**本地微调的开源大模型**，对体检结果做自然语言解读与设施选址建议，不依赖任何外部 AI API。
+
+| 环节 | 实现 |
+|---|---|
+| 基座模型 | 魔塔开源 `Qwen2.5-1.5B-Instruct`（3.09GB） |
+| 训练方式 | 自写 QLoRA 微调脚本（`ai/train.py`），4-bit 量化 + LoRA 适配器 |
+| 训练数据 | `ai/data_gen.py` 用本项目引擎真实跑 60 个中心点生成 54 条"体检数据→解读+选址建议"样本（train 54 / dev 6） |
+| 训练成本 | 本机 RTX 5060 8GB 显存，约 3 分钟完成一轮微调 |
+| 产物 | LoRA 权重仅 **72MB**（`ai/models/qwen15min-lora`，gitignore 不入库） |
+| 推理服务 | `ai/server.py` 独立服务 :8010，首次调用懒加载约 20s，之后流式生成 |
+| 前端入口 | 体检结果区「✨ AI 解读与选址建议」按钮，AI 未启动时自动提示不可用、不影响主流程 |
+
+**输出示例**（自训模型真实格式，内容随体检结果变化）：
+
+```
+【体检解读】该中心点 15 分钟步行圈覆盖良好，综合评分 80 分。
+医疗（67 处）与餐饮（49 处）配置完善，购物（17 处）与文体（5 处）相对偏弱。
+【风险提示】养老设施为该圈最薄弱项（0 分），区域内缺少养老服务资源。
+【选址建议】若需补充生活服务，建议优先在东北方向布设菜市场/便利店，
+以覆盖当前 1km 内的服务盲区（灰色区域）。
+```
+
+训练全程保姆级复现教程见 [`docs/模型训练教程.md`](docs/模型训练教程.md)（含环境搭建、数据生成、微调、部署四步）。
 
 ## API 文档
 
@@ -128,22 +187,23 @@ ai\.venv\Scripts\python -u ai\server.py        # 独立 AI 服务 :8010
     "polygon": [[lng, lat], ...],
     "boundary_polygon": [[lng, lat], ...],
     "grid": { "n": 60, "half_size_m": 2000, "max_minutes": 40.5, "values": [...] },
-    "stats": { "max_reach_m": 1169.1, "area_km2": 3.6288, "boundary_points": 24, "walk_minutes": 15 }
+    "stats": { "max_reach_m": 929.5, "area_km2": 1.7309, "boundary_points": 48, "walk_minutes": 15 }
   },
   "pois": [{ "name": "...", "lng": ..., "lat": ..., "category": "医疗", "search_key": "药店" }],
-  "coverage": { "counts": {...}, "scores": {...}, "overall": 95, "blind_penalty": 5, "blind_summary": "..." },
+  "coverage": { "counts": {...}, "scores": {...}, "overall": 80, "blind_penalty": 20, "blind_summary": "..." },
   "blind_spots": { "required": [...], "polygons": [...], "cluster_count": 1, "summary": "..." },
-  "elapsed_ms": 195
+  "elapsed_ms": 28000
 }
 ```
 
 ## 等时圈算法（核心，5 步）
 
-1. **扇区采样**：以中心点为圆心分 24 个方向（每 15°），每个方向沿直线每 100m 布采样点至 2km（共 480 点）；
-2. **批量测时**：用百度路线矩阵（`routematrix/v2/walking`）分块一次性测出采样点步行耗时（分块 ≤90 组合 + 令牌桶限流）；
+1. **扇区采样**：以中心点为圆心分 48 个方向（每 7.5°），每个方向沿直线每 100m 布采样点至 2km（共 960 点）；
+2. **批量测时**：用百度路线矩阵（`routematrix/v2/walking`）分块一次性测出采样点步行耗时（分块 ≤90 组合 + 独立慢速令牌桶，规避并发配额限制）；
 3. **边界提取**：每个方向取「步行 ≤ 阈值」的最远点，并在相邻测点间线性插值细化；
 4. **IDW 空间插值**：对中心周边 60×60 网格节点，用邻近测时点做反距离加权插值，得到「分钟场」（同时作为热力图数据）；
 5. **Marching Squares**：从分钟场提取阈值等值线，得到平滑等时圈多边形。
+6. **网格硬边界修正**：任何插值格点若超出所在采样方向的真实可达边界，强制标记为不可达，消除跨河/跨湖的"插值凸出"假覆盖。
 
 不获取底层路网数据，仅用分散点位 API 测时结果推导近似连通区域——命中评审的「创新空间插值」加分项。
 详细设计见 [docs/技术设计文档.md](docs/技术设计文档.md)。
@@ -165,7 +225,7 @@ ai\.venv\Scripts\python -u ai\server.py        # 独立 AI 服务 :8010
 │   │       ├── poi_cleaner.py
 │   │       ├── blind_spot.py
 │   │       └── report.py
-│   ├── tests/                 # pytest 单元测试（23 项）
+│   ├── tests/                 # pytest 单元测试（30 项）
 │   ├── requirements.txt
 │   └── run.py
 ├── frontend/                  # 静态前端（Leaflet + ECharts，由 FastAPI 托管）
@@ -193,7 +253,7 @@ cd backend
 .venv/bin/python -m pytest -q        # Linux/macOS
 ```
 
-覆盖：坐标转换、等时圈算法、POI 清洗、盲区识别、限流重试、百度客户端解析、API 端点（28 项全部通过）。
+覆盖：坐标转换、等时圈算法（含网格硬边界修正回归）、POI 清洗、盲区识别、限流重试、百度客户端解析、API 端点（30 项全部通过）。
 
 ## 开源许可
 
