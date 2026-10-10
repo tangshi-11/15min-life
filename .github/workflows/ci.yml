@@ -27,3 +27,32 @@ jobs:
       - name: Run pytest
         working-directory: backend
         run: python -m pytest -q
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (verify Dockerfile & deps)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: 15min-life:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test container boots
+        run: |
+          docker run --rm -d -p 8000:8000 -e BAIDU_AK_SERVER="" -e FORCE_MOCK=true --name 15min-ci 15min-life:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/api/health > /dev/null; then
+              echo "health OK after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          docker logs 15min-ci || true
+          echo "container failed to become healthy" && exit 1
