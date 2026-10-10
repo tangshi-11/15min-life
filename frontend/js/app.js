@@ -127,12 +127,19 @@
         var b = wgs84ToBd09(ll.lng, ll.lat);
         currentCenter = { lat: b[1], lng: b[0] };
         document.getElementById("addressInput").value = "自定义坐标";
+        inspect(); // API 已接入：拖拽红标后自动重新体检
       });
     }
     if (fly) map.flyTo([w[1], w[0]], Math.max(map.getZoom(), 15), { duration: 0.8 });
   }
 
+  /* 拖拽地图保护：Leaflet 快速/小幅拖动可能误触发 click，避免中心点被“浏览”操作篡改 */
+  var mapDragging = false;
+  map.on("dragstart", function () { mapDragging = true; });
+  map.on("moveend", function () { setTimeout(function () { mapDragging = false; }, 250); });
+
   map.on("click", function (e) {
+    if (mapDragging) return; // 拖拽结束的误触 click 直接忽略
     var b = wgs84ToBd09(e.latlng.lng, e.latlng.lat);
     setCenterBd(b[1], b[0], false);
     document.getElementById("addressInput").value = "自定义坐标";
