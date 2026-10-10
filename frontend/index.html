@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>15分钟生活圈 · 智能体检与规划助手</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="/css/style.css?v=20261010">
+<link rel="stylesheet" href="/css/style.css?v=20261011">
 </head>
 <body>
 <div class="app">
@@ -13,9 +13,17 @@
     <h1>15分钟生活圈<br>智能体检与规划助手</h1>
     <div class="mode-badge" id="modeBadge">加载中…</div>
 
-    <label for="addressInput">中心点地址（全国通用）</label>
+    <label for="detailInput">中心点地址（全国通用）</label>
+    <div class="row pca-row">
+      <select id="provinceSelect"><option value="">省份</option></select>
+      <select id="citySelect"><option value="">城市</option></select>
+      <select id="districtSelect"><option value="">区县</option></select>
+    </div>
     <div class="row">
-      <input id="addressInput" placeholder="输入地址，如：昆明翠湖公园" />
+      <input id="detailInput" placeholder="详细地址（选填），如：翠湖公园" />
+    </div>
+    <div class="row">
+      <input id="addressInput" placeholder="或直接输入完整地址，如：昆明翠湖公园" />
       <button id="inspectBtn" class="primary">开始体检</button>
     </div>
     <div class="samples">
@@ -60,6 +68,6 @@
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-<script src="/js/app.js?v=20261010b"></script>
+<script src="/js/app.js?v=20261011"></script>
 </body>
 </html>

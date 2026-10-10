@@ -24,6 +24,16 @@ html, body { height: 100%; font-family: "Microsoft YaHei", "PingFang SC", system
   border-radius: 8px; outline: none; background: #fff;
 }
 #addressInput:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+.pca-row select {
+  flex: 1; min-width: 0; padding: 8px 6px; font-size: 13px; color: #334155;
+  border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; outline: none;
+}
+.pca-row select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+#detailInput {
+  width: 100%; padding: 9px 10px; font-size: 14px; border: 1px solid #cbd5e1;
+  border-radius: 8px; outline: none; background: #fff;
+}
+#detailInput:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
 button.primary {
   padding: 9px 14px; font-size: 14px; color: #fff; background: #2563eb;
   border: none; border-radius: 8px; cursor: pointer; white-space: nowrap;

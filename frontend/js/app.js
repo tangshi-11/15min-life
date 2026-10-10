@@ -114,8 +114,61 @@
   var currentCenter = { lat: 25.0406, lng: 102.7146 }; // BD-09
   var lastResult = null; // 最近一次体检结果，供 AI 解读使用
 
+  /* ---------- 省市区级联（本地内置数据，不耗 API 配额） ---------- */
+  var pcaData = null;
+  function clearPcaForm() {
+    ["provinceSelect", "citySelect", "districtSelect"].forEach(function (id) {
+      var s = document.getElementById(id);
+      if (s) s.value = "";
+    });
+    var d = document.getElementById("detailInput");
+    if (d) d.value = "";
+  }
+  function fillSelect(sel, list, placeholder) {
+    sel.innerHTML = '<option value="">' + (placeholder || "请选择") + "</option>";
+    list.forEach(function (item) {
+      var o = document.createElement("option");
+      o.value = item.code; o.textContent = item.name;
+      sel.appendChild(o);
+    });
+  }
+  function formAddress() {
+    var ps = document.getElementById("provinceSelect"), cs = document.getElementById("citySelect"),
+        ds = document.getElementById("districtSelect"), dt = document.getElementById("detailInput");
+    var parts = [];
+    if (ps && ps.selectedIndex > 0) parts.push(ps.options[ps.selectedIndex].text);
+    if (cs && cs.selectedIndex > 0) parts.push(cs.options[cs.selectedIndex].text);
+    if (ds && ds.selectedIndex > 0) parts.push(ds.options[ds.selectedIndex].text);
+    if (dt && dt.value.trim()) parts.push(dt.value.trim());
+    return parts.length ? parts.join("") : null;
+  }
+  function initPcaForm() {
+    var ps = document.getElementById("provinceSelect"), cs = document.getElementById("citySelect"),
+        ds = document.getElementById("districtSelect");
+    if (!ps) return;
+    fetch("/data/pca.json").then(function (r) { return r.json(); }).then(function (d) {
+      pcaData = d;
+      d.forEach(function (p) {
+        var o = document.createElement("option");
+        o.value = p.code; o.textContent = p.name;
+        ps.appendChild(o);
+      });
+    }).catch(function () { /* 数据加载失败则仅保留自由输入 */ });
+    ps.addEventListener("change", function () {
+      var p = pcaData && pcaData.find(function (x) { return x.code === ps.value; });
+      fillSelect(cs, p ? p.children : [], "请选择城市");
+      ds.innerHTML = '<option value="">请选择区县</option>';
+    });
+    cs.addEventListener("change", function () {
+      var p = pcaData && pcaData.find(function (x) { return x.code === ps.value; });
+      var c = p && p.children.find(function (x) { return x.code === cs.value; });
+      fillSelect(ds, c ? c.children : [], "请选择区县");
+    });
+  }
+
   function setCenterBd(lat, lng, fly) {
     currentCenter = { lat: lat, lng: lng };
+    clearPcaForm(); // 地图/拖拽选点时坐标优先，清空省市区表单避免覆盖
     var w = bd09ToWgs84(lng, lat);
     if (centerMarker) {
       centerMarker.setLatLng([w[1], w[0]]);
@@ -286,6 +339,8 @@
   function inspect() {
     if (inspecting) return;
     var addr = document.getElementById("addressInput").value.trim();
+    var fa = formAddress(); // 省市区+详细地址优先于自由输入
+    if (fa) addr = fa;
     var walk = parseInt(document.getElementById("walkSelect").value, 10) || 15;
     var payload = { walk_minutes: walk };
     if (addr && addr !== "自定义坐标") {
@@ -392,11 +447,13 @@
     document.getElementById("addressInput").addEventListener("keydown", function (e) { if (e.key === "Enter") inspect(); });
     Array.prototype.forEach.call(document.querySelectorAll(".samples button"), function (b) {
       b.addEventListener("click", function () {
+        clearPcaForm(); // 示例地址优先，清空省市区+详细地址
         document.getElementById("addressInput").value = b.getAttribute("data-addr");
         inspect();
       });
     });
     renderLegend();
+    initPcaForm();
 
     fetch("/api/config").then(function (r) { return r.json(); }).then(function (cfg) {
       var badge = document.getElementById("modeBadge");
