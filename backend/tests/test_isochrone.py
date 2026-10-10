@@ -83,3 +83,74 @@ def test_mock_barrier_position_dependent():
     b1, b2 = mock_mod._barrier_bearing(o1, 42), mock_mod._barrier_bearing(o2, 42)
     assert b1 != b2
     assert mock_mod._barrier_bearing(o1, 42) == b1  # 确定性
+
+
+class _FakeClient:
+    """可控的单点算路客户端：按距离返回耗时，可注入失败。"""
+
+    def __init__(self, sec_at, fail=False):
+        self.sec_at = sec_at
+        self.fail = fail
+
+    async def walking_direction(self, origin, destination):
+        if self.fail:
+            raise RuntimeError("quota")
+        d = mock_mod.haversine_m(origin[1], origin[0], destination[1], destination[0])
+        return {"duration_s": self.sec_at(d), "distance_m": int(d)}
+
+
+@pytest.mark.asyncio
+async def test_refine_mock_keeps_boundary():
+    """Mock 口径下复核与采样一致：开阔方向边界不会被内缩（正常区域不被误收）。"""
+    o = (25.0406, 102.7146)
+    cfg = _cfg()
+    base = mock_mod._barrier_bearing(o, 42)
+    open_ang = (base + 90.0) % 360.0
+    # 用真实采样边界（符合 Mock 语义），而非硬编码值
+    rays = isochrone.build_rays(o[0], o[1], cfg.directions, cfg.step_m, cfg.max_radius_m)
+    dests = isochrone.flat_destinations(rays)
+    elements = []
+    for i in range(0, len(dests), cfg.matrix_chunk):
+        chunk = dests[i:i + cfg.matrix_chunk]
+        elements.extend((await MockBaiduClient(seed=42).route_matrix_walking([o], chunk))["elements"])
+    bounds = isochrone.boundary_by_rays(rays, elements, 900.0, cfg.step_m, cfg.max_radius_m)
+    bd_map = dict(bounds)
+    near_open = min(bd_map.keys(), key=lambda k: abs(((k - open_ang) + 180) % 360 - 180))
+    client = MockBaiduClient(seed=42)
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10)
+    out_map = dict(out)
+    # 开阔方向最多允许二分精度级微调（~35m），不允许显著内缩
+    assert out_map[near_open] >= bd_map[near_open] - 60.0, "开阔方向不应被复核显著内缩"
+    assert all(40.0 <= d <= 2000.0 for _, d in out), "边界应保持合理范围"
+
+
+@pytest.mark.asyncio
+async def test_refine_inner_shrink_on_water():
+    """水域直线口径：批量说可达(远)，单点复核超时 → 内缩。"""
+    o = (25.0406, 102.7146)
+    client = _FakeClient(sec_at=lambda d: 1800.0 + d)
+    bounds = [(0.0, 800.0), (90.0, 1200.0), (180.0, 500.0), (270.0, 1500.0)]
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10)
+    for (_, orig), (_, ref) in zip(bounds, out):
+        assert ref < orig - 100.0, "水域方向应显著内缩"
+        assert ref > 40.0, "内缩后仍保持合理最小半径"
+
+
+@pytest.mark.asyncio
+async def test_refine_outer_extend_when_fast():
+    """单点耗时明显小于阈值 → 外扩探测更远点。"""
+    o = (25.0406, 102.7146)
+    client = _FakeClient(sec_at=lambda d: 500.0)
+    bounds = [(90.0, 600.0)]
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10)
+    assert out[0][1] > 800.0, "耗时充足的方向应外扩"
+
+
+@pytest.mark.asyncio
+async def test_refine_failure_keeps_original():
+    """复核失败（配额/网络）→ 保持原边界，安全降级。"""
+    o = (25.0406, 102.7146)
+    client = _FakeClient(sec_at=lambda d: 0.0, fail=True)
+    bounds = [(0.0, 800.0), (90.0, 1200.0)]
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10)
+    assert out == bounds

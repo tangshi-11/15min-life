@@ -43,12 +43,14 @@ class BaiduClient:
         session: httpx.AsyncClient,
         bucket: Any | None = None,
         matrix_bucket: Any | None = None,
+        direction_bucket: Any | None = None,
         timeout: float = 15.0,
     ) -> None:
         self.ak = ak
         self.session = session
         self.bucket = bucket
         self.matrix_bucket = matrix_bucket
+        self.direction_bucket = direction_bucket
         self.timeout = timeout
 
     async def _get(
@@ -135,7 +137,9 @@ class BaiduClient:
             "origin": f"{origin[0]},{origin[1]}",
             "destination": f"{destination[0]},{destination[1]}",
         }
-        data = await self._get("/directionlite/v1/walking", params)
+        data = await self._get(
+            "/directionlite/v1/walking", params, bucket=self.direction_bucket, retries=4, base_delay=0.8
+        )
         route = data["result"]["routes"][0]
         return {"duration_s": int(route["duration"]), "distance_m": int(route["distance"])}
 

@@ -239,6 +239,87 @@ def _polygon_area_km2(center_lat: float, pts) -> float:
     return abs(area) / 2.0 / 1e6
 
 
+async def refine_boundaries(
+    center_lat: float,
+    center_lng: float,
+    boundaries: list[tuple[float, float]],
+    client: Any,
+    limit_s: float,
+    step_m: float,
+    max_radius_m: float,
+    max_refines: int = 12,
+) -> list[tuple[float, float]]:
+    """单点步行算路复核"可疑边界方向"，修正批量接口对水域/异常点的直线口径误差。
+
+    背景：百度批量算路(routematrix)对水域等不可步行点返回近似直线耗时，会把湖面/河道
+    方向的可达边界推得过远（实测湖对岸方向被高估 20+ 分钟）；同时个别方向也会因采样
+    粒度被低估。这里对偏离中位数最大的若干个方向，用轻量单点算路(directionlite)复核：
+    - 真实耗时 > 阈值 → 向内二分，取"≤阈值的最远点"（内缩）；
+    - 真实耗时 明显 < 阈值 → 向外探测更远采样点（外扩，最多 3 步）。
+    复核失败（配额/异常）→ 保持原边界（安全降级，不影响主流程）。
+
+    boundaries: [(角度, 距离米)]，中心为 (center_lat, center_lng)（BD-09）。
+    """
+    if not boundaries:
+        return boundaries
+    # 均匀角度抽样：按角度等间隔取 max_refines 个方向复核（保证修正覆盖全圈）。
+    # 批量接口的误差不只看"偏离中位数"（如个别方向被系统性低估/高估但数值看着正常），
+    # 均匀抽样能以最少复核次数覆盖全角度。
+    sorted_b = sorted(boundaries)  # 按角度升序
+    step_ang = 360.0 / max_refines
+    suspects = set()
+    for k in range(max_refines):
+        target = k * step_ang
+        suspects.add(min(sorted_b, key=lambda t: abs(((t[0] - target) + 180) % 360 - 180))[0])
+    out: list[tuple[float, float]] = []
+    for ang, bd in boundaries:
+        if ang not in suspects:
+            out.append((ang, bd))
+            continue
+        try:
+            rad = math.radians(ang)
+            lng, lat = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
+            info = await client.walking_direction((center_lat, center_lng), (lat, lng))
+            t = float(info["duration_s"])
+            if t > limit_s:
+                # 内缩：二分找 ≤limit_s 的最远点（4 次收敛到 ~62m，控制复核次数）
+                lo, hi = 0.0, bd
+                best = step_m * 0.5
+                for _ in range(4):
+                    mid = (lo + hi) / 2.0
+                    mlng, mlat = offset_lnglat(center_lng, center_lat, mid * math.sin(rad), mid * math.cos(rad))
+                    try:
+                        mi = await client.walking_direction((center_lat, center_lng), (mlat, mlng))
+                        mt = float(mi["duration_s"])
+                    except Exception:
+                        mt = limit_s + 1.0  # 复核失败按超时继续内缩（更保守）
+                    if mt <= limit_s:
+                        lo = mid
+                        best = mid
+                    else:
+                        hi = mid
+                bd = max(best, step_m * 0.5)
+            elif t < limit_s * 0.9:
+                # 外扩：复核耗时明显低于阈值（>10% 余量）→ 向外探测最多 2 步
+                for k in range(1, 3):
+                    nd = bd + k * step_m
+                    if nd > max_radius_m:
+                        break
+                    nlng, nlat = offset_lnglat(center_lng, center_lat, nd * math.sin(rad), nd * math.cos(rad))
+                    try:
+                        ni = await client.walking_direction((center_lat, center_lng), (nlat, nlng))
+                    except Exception:
+                        break
+                    if float(ni["duration_s"]) <= limit_s:
+                        bd = nd
+                    else:
+                        break
+        except Exception:
+            pass  # 复核失败：保持原边界
+        out.append((ang, bd))
+    return out
+
+
 async def compute_isochrone(
     center_lat: float,
     center_lng: float,
@@ -264,7 +345,31 @@ async def compute_isochrone(
         elements.extend(result["elements"])
 
     boundaries = boundary_by_rays(rays, elements, limit_s, cfg.step_m, cfg.max_radius_m)
-    grid_min = idw_minutes_grid(center_lat, center_lng, rays, elements, limit_s, cfg.max_radius_m, cfg.grid_n)
+
+    # —— 单点复核（方案B）——
+    # 批量算路对水域/异常点有"直线口径"误差，用 directionlite 复核可疑方向并内缩/外扩。
+    # Mock 客户端与真实客户端行为一致（Mock 下复核耗时与采样一致），失败安全降级。
+    try:
+        boundaries = await refine_boundaries(
+            center_lat, center_lng, boundaries, client, limit_s, cfg.step_m, cfg.max_radius_m
+        )
+    except Exception as exc:  # 复核整体失败不阻断主流程
+        logger.warning("边界单点复核失败，使用采样边界：%s", exc)
+
+    # 用复核后的边界重建网格剖面：超出方向边界的采样点标记不可达，
+    # 使 IDW 网格与渲染多边形同样反映复核结果（水域方向收缩）。
+    refined_map = {ang: bd for ang, bd in boundaries}
+    adjusted = list(elements)
+    idx = 0
+    for ang, pts in rays:
+        for (d, _lat, _lng) in pts:
+            if ang in refined_map and d > refined_map[ang] and adjusted[idx] is not None:
+                adjusted[idx] = dict(adjusted[idx])
+                adjusted[idx]["duration"] = limit_s * 2.0  # 标记不可达（超过修正后边界）
+                adjusted[idx]["distance"] = int(d)
+            idx += 1
+
+    grid_min = idw_minutes_grid(center_lat, center_lng, rays, adjusted, limit_s, cfg.max_radius_m, cfg.grid_n)
 
     # —— 网格硬边界修正 ——
     # IDW 插值在稀疏方向（水域/障碍）会把采样点之间的空白“填平”，导致等时圈凸出到
