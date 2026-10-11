@@ -123,17 +123,6 @@ async def inspect(req: InspectRequest):
     warnings: list[str] = []
     mode = "mock" if settings.mock_mode else "live"
 
-    # 0) 结果缓存：仅 live 模式 + 直接给定坐标时启用（100m 网格 key，sqlite 落盘）
-    #    命中则直接返回历史真实结果，不重复烧配额、秒回；前端据 cached 标记展示“缓存结果”。
-    cache_key = None
-    if not settings.mock_mode and req.center:
-        cache_key = result_cache.make_key(req.center.lat, req.center.lng)
-        cached = result_cache.get(cache_key)
-        if cached is not None:
-            cached["cached"] = True
-            cached["elapsed_ms"] = round((time.time() - t0) * 1000)
-            return cached
-
     # 1) 中心点解析
     center: dict | None = None
     address_label = req.address or "自定义坐标"
@@ -159,6 +148,26 @@ async def inspect(req: InspectRequest):
         admin["boundary"] = _community_boundary(center["lat"], center["lng"], settings.mock_seed)
     except Exception as exc:
         warnings.append(f"逆地理编码失败({exc})，已使用输入地址")
+
+    # 2.5) 结果缓存：仅 live 模式 + 直接给定坐标 + 中心点落在居民区内时启用
+    #      居民区判定：半径 200m 内小区类 POI 检索（一次轻量请求）；检索失败或非居民区 → 不查不写。
+    cache_key = None
+    allow_cache = False
+    if not settings.mock_mode and req.center:
+        cache_key = result_cache.make_key(req.center.lat, req.center.lng)
+        try:
+            nearby = await client.place_search(
+                "小区", location=(center["lat"], center["lng"]), radius=200, page_size=10, max_pages=1
+            )
+            allow_cache = bool(nearby)
+        except Exception:
+            allow_cache = False
+        if allow_cache:
+            cached = result_cache.get(cache_key)
+            if cached is not None:
+                cached["cached"] = True
+                cached["elapsed_ms"] = round((time.time() - t0) * 1000)
+                return cached
 
     walk_minutes = req.walk_minutes or settings.walking_minutes
     radius_m = req.radius_m or max(settings.poi_radius_m, settings.blind_radius_m * 2)
@@ -214,7 +223,7 @@ async def inspect(req: InspectRequest):
         "cached": False,
         "elapsed_ms": round((time.time() - t0) * 1000),
     }
-    if cache_key is not None:
+    if allow_cache:
         result_cache.set(cache_key, resp)
     return resp
 
