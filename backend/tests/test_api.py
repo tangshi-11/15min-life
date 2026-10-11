@@ -1,4 +1,5 @@
 """FastAPI 端点测试（演示模式）。"""
+from app.core import result_cache
 from app.main import app
 from fastapi.testclient import TestClient
 
@@ -24,6 +25,7 @@ def test_inspect_with_address():
 
 
 def test_inspect_with_center_coords():
+    result_cache.clear()  # 隔离：防止历史测试写入的缓存脏数据命中
     with TestClient(app) as client:
         r = client.post("/api/inspect", json={"center": {"lat": 25.0406, "lng": 102.7146}})
         assert r.status_code == 200

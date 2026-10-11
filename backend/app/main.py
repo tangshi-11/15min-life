@@ -22,7 +22,7 @@ from .api.baidu_client import BaiduClient
 from .api.mock import MockBaiduClient
 from .api.rate_limiter import TokenBucket
 from .config import settings
-from .core import blind_spot, isochrone, poi_cleaner
+from .core import blind_spot, isochrone, poi_cleaner, result_cache
 from .core import report as report_mod
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,17 @@ async def inspect(req: InspectRequest):
     warnings: list[str] = []
     mode = "mock" if settings.mock_mode else "live"
 
+    # 0) 结果缓存：仅 live 模式 + 直接给定坐标时启用（100m 网格 key，sqlite 落盘）
+    #    命中则直接返回历史真实结果，不重复烧配额、秒回；前端据 cached 标记展示“缓存结果”。
+    cache_key = None
+    if not settings.mock_mode and req.center:
+        cache_key = result_cache.make_key(req.center.lat, req.center.lng)
+        cached = result_cache.get(cache_key)
+        if cached is not None:
+            cached["cached"] = True
+            cached["elapsed_ms"] = round((time.time() - t0) * 1000)
+            return cached
+
     # 1) 中心点解析
     center: dict | None = None
     address_label = req.address or "自定义坐标"
@@ -191,7 +202,7 @@ async def inspect(req: InspectRequest):
     # 6) 体检报告
     rpt = report_mod.build_report(center, iso, cleaned, blind, walk_minutes)
 
-    return {
+    resp = {
         "center": {"lat": center["lat"], "lng": center["lng"], "address": address_label},
         "mode": mode,
         "warnings": warnings,
@@ -200,8 +211,12 @@ async def inspect(req: InspectRequest):
         "pois": cleaned,
         "coverage": rpt,
         "blind_spots": blind,
+        "cached": False,
         "elapsed_ms": round((time.time() - t0) * 1000),
     }
+    if cache_key is not None:
+        result_cache.set(cache_key, resp)
+    return resp
 
 
 def _community_boundary(center_lat: float, center_lng: float, seed: int) -> list[list[float]]:

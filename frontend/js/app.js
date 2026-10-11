@@ -389,9 +389,10 @@
     document.getElementById("blindSummary").textContent = blindTxt + warn;
     var s = data.isochrone.stats || {};
     var inPoly = cov.in_polygon_pois || 0;
+    var cachedTxt = data.cached ? " · ⚡ 缓存结果（100m 网格内复用，未重新算路）" : "";
     document.getElementById("statLine").textContent =
       "等时圈面积 " + (s.area_km2 || 0) + " km² · 最远可达 " + Math.round(s.max_reach_m || 0) + " m · " +
-      "圈内设施 " + inPoly + " 个 · 耗时 " + data.elapsed_ms + " ms";
+      "圈内设施 " + inPoly + " 个 · 耗时 " + data.elapsed_ms + " ms" + cachedTxt;
 
     document.getElementById("charts").hidden = false;
     if (!radarChart) initCharts();
