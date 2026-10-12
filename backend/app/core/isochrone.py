@@ -247,15 +247,16 @@ async def refine_boundaries(
     limit_s: float,
     step_m: float,
     max_radius_m: float,
-    max_refines: int = 12,
+    max_refines: int = 48,
 ) -> list[tuple[float, float]]:
-    """单点步行算路复核"可疑边界方向"，修正批量接口对水域/异常点的直线口径误差。
+    """单点步行算路复核全部方向边界，修正批量接口对水域/异常点的直线口径误差。
 
     背景：百度批量算路(routematrix)对水域等不可步行点返回近似直线耗时，会把湖面/河道
-    方向的可达边界推得过远（实测湖对岸方向被高估 20+ 分钟）；同时个别方向也会因采样
-    粒度被低估。这里对偏离中位数最大的若干个方向，用轻量单点算路(directionlite)复核：
-    - 真实耗时 > 阈值 → 向内二分，取"≤阈值的最远点"（内缩）；
-    - 真实耗时 明显 < 阈值 → 向外探测更远采样点（外扩，最多 3 步）。
+    方向的可达边界推得过远（实测湖对岸方向被高估 20+ 分钟，等时圈覆盖水面）；同时个别
+    方向也会因采样粒度被低估。这里对全部方向（默认 48，REVIEW_DIRECTIONS 可调）用轻量
+    单点算路(directionlite)复核：
+    - 真实耗时 > 阈值 → 向内二分，取"≤阈值的最远点"（内缩，最多 2 次收敛到 ~150m）；
+    - 真实耗时 明显 < 阈值 → 向外探测更远采样点（外扩，最多 2 步）。
     复核失败（配额/异常）→ 保持原边界（安全降级，不影响主流程）。
 
     boundaries: [(角度, 距离米)]，中心为 (center_lat, center_lng)（BD-09）。
@@ -264,7 +265,7 @@ async def refine_boundaries(
         return boundaries
     # 均匀角度抽样：按角度等间隔取 max_refines 个方向复核（保证修正覆盖全圈）。
     # 批量接口的误差不只看"偏离中位数"（如个别方向被系统性低估/高估但数值看着正常），
-    # 均匀抽样能以最少复核次数覆盖全角度。
+    # 均匀抽样能以最少复核次数覆盖全角度；默认 48 = 全方向复核，杜绝水域方向漏网。
     sorted_b = sorted(boundaries)  # 按角度升序
     step_ang = 360.0 / max_refines
     suspects = set()
@@ -276,31 +277,53 @@ async def refine_boundaries(
         if ang not in suspects:
             out.append((ang, bd))
             continue
+
+        def _suspect(duration_s: float, distance_m: float | None, line_dist: float) -> bool:
+            """directionlite 对水域/无效点返回 0s/1m 这类垃圾数据（起点终点被判定重合），
+            不可信。规则：耗时 ≤30s，或返回距离 < 直线距离的一半 → 疑似水域/无效。
+            此时绝不能按"可达且富余"外扩，否则等时圈会被推到湖面深处。"""
+            if duration_s <= 30.0:
+                return True
+            if distance_m is not None and line_dist > 0 and distance_m < line_dist * 0.5:
+                return True
+            return False
+
+        async def _refine_inward() -> float:
+            """沿方向向内二分，找 ≤limit_s 的最远点（2 次收敛到 ~150m）。
+            二分点同样做疑似校验：水域点按超时处理，继续向内收缩。"""
+            lo, hi = 0.0, bd
+            best = step_m * 0.5
+            for _ in range(2):
+                mid = (lo + hi) / 2.0
+                mlng, mlat = offset_lnglat(center_lng, center_lat, mid * math.sin(rad), mid * math.cos(rad))
+                try:
+                    mi = await client.walking_direction((center_lat, center_lng), (mlat, mlng))
+                    mt = float(mi["duration_s"])
+                    md = float(mi.get("distance_m", 0.0))
+                    if _suspect(mt, md, mid):
+                        mt = limit_s + 1.0  # 水域/无效 → 视为超时，继续内缩
+                except Exception:
+                    mt = limit_s + 1.0  # 复核失败按超时继续内缩（更保守）
+                if mt <= limit_s:
+                    lo = mid
+                    best = mid
+                else:
+                    hi = mid
+            return max(best, step_m * 0.5)
+
         try:
             rad = math.radians(ang)
             lng, lat = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
             info = await client.walking_direction((center_lat, center_lng), (lat, lng))
             t = float(info["duration_s"])
-            if t > limit_s:
-                # 内缩：二分找 ≤limit_s 的最远点（4 次收敛到 ~62m，控制复核次数）
-                lo, hi = 0.0, bd
-                best = step_m * 0.5
-                for _ in range(4):
-                    mid = (lo + hi) / 2.0
-                    mlng, mlat = offset_lnglat(center_lng, center_lat, mid * math.sin(rad), mid * math.cos(rad))
-                    try:
-                        mi = await client.walking_direction((center_lat, center_lng), (mlat, mlng))
-                        mt = float(mi["duration_s"])
-                    except Exception:
-                        mt = limit_s + 1.0  # 复核失败按超时继续内缩（更保守）
-                    if mt <= limit_s:
-                        lo = mid
-                        best = mid
-                    else:
-                        hi = mid
-                bd = max(best, step_m * 0.5)
+            d = float(info.get("distance_m", 0.0))
+            if _suspect(t, d, bd):
+                # 水域/无效复核：不能信任结果（批量口径已把边界推远），按向内收缩处理
+                bd = await _refine_inward()
+            elif t > limit_s:
+                bd = await _refine_inward()
             elif t < limit_s * 0.9:
-                # 外扩：复核耗时明显低于阈值（>10% 余量）→ 向外探测最多 2 步
+                # 外扩：仅当复核结果可信（非水域垃圾数据）时向外探测最多 2 步
                 for k in range(1, 3):
                     nd = bd + k * step_m
                     if nd > max_radius_m:
@@ -310,7 +333,11 @@ async def refine_boundaries(
                         ni = await client.walking_direction((center_lat, center_lng), (nlat, nlng))
                     except Exception:
                         break
-                    if float(ni["duration_s"]) <= limit_s:
+                    nt = float(ni["duration_s"])
+                    ndist = float(ni.get("distance_m", 0.0))
+                    if _suspect(nt, ndist, nd):
+                        break  # 前方是水域 → 不外扩
+                    if nt <= limit_s:
                         bd = nd
                     else:
                         break
@@ -347,11 +374,13 @@ async def compute_isochrone(
     boundaries = boundary_by_rays(rays, elements, limit_s, cfg.step_m, cfg.max_radius_m)
 
     # —— 单点复核（方案B）——
-    # 批量算路对水域/异常点有"直线口径"误差，用 directionlite 复核可疑方向并内缩/外扩。
-    # Mock 客户端与真实客户端行为一致（Mock 下复核耗时与采样一致），失败安全降级。
+    # 批量算路对水域/异常点有"直线口径"误差（实测把湖面/河道方向边界高估 20+ 分钟），
+    # 必须用 directionlite 复核全部分方向（默认 48，REVIEW_DIRECTIONS 可调）并内缩/外扩，
+    # 否则未复核方向会把等时圈盖到水面上。Mock 客户端行为与真实一致，失败安全降级。
     try:
         boundaries = await refine_boundaries(
-            center_lat, center_lng, boundaries, client, limit_s, cfg.step_m, cfg.max_radius_m
+            center_lat, center_lng, boundaries, client, limit_s, cfg.step_m, cfg.max_radius_m,
+            max_refines=cfg.review_directions,
         )
     except Exception as exc:  # 复核整体失败不阻断主流程
         logger.warning("边界单点复核失败，使用采样边界：%s", exc)

@@ -26,6 +26,7 @@ class Settings:
         self.step_m: float = float(os.getenv("SAMPLE_STEP_M", "100"))
         self.matrix_chunk: int = int(os.getenv("MATRIX_CHUNK", "90"))
         self.grid_n: int = int(os.getenv("GRID_N", "60"))
+        self.review_directions: int = int(os.getenv("REVIEW_DIRECTIONS", "48"))
         self.poi_radius_m: float = float(os.getenv("POI_RADIUS_M", "2500"))
         self.blind_radius_m: float = float(os.getenv("BLIND_RADIUS_M", "1000"))
         self.blind_cell_m: float = float(os.getenv("BLIND_CELL_M", "200"))

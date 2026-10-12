@@ -154,3 +154,24 @@ async def test_refine_failure_keeps_original():
     bounds = [(0.0, 800.0), (90.0, 1200.0)]
     out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10)
     assert out == bounds
+
+
+class _WaterGarbageClient:
+    """模拟 directionlite 对水域点返回 0s/1m 垃圾数据（起点终点被判定重合）。"""
+
+    async def walking_direction(self, origin, destination):
+        return {"duration_s": 0, "distance_m": 1}
+
+
+@pytest.mark.asyncio
+async def test_refine_water_garbage_shrinks():
+    """水域垃圾复核（0s/1m）：绝不能按'可达且富余'外扩，必须向内收缩。
+    实测 directionlite 对滇池湖面点返回 0s/1m，旧逻辑误走外扩把等时圈推到湖心 2km。"""
+    o = (25.0406, 102.7146)
+    client = _WaterGarbageClient()
+    bounds = [(0.0, 2000.0), (90.0, 1500.0), (180.0, 1200.0), (270.0, 2000.0)]
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10)
+    for (_, orig), (_, ref) in zip(bounds, out):
+        assert ref < orig - 100.0, "水域垃圾数据必须内缩，禁止外扩"
+        assert ref > 40.0, "内缩后仍保持合理最小半径"
+
