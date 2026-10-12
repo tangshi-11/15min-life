@@ -59,7 +59,7 @@ class InspectRequest(BaseModel):
 bucket = TokenBucket(settings.qps_limit)
 # routematrix 并发配额极严（默认约 1-2 并发），独立慢桶防 401 并发超限
 matrix_bucket = TokenBucket(1.0)
-direction_bucket = TokenBucket(2.0)  # directionlite AK 级并发配额很紧（实测2并发内稳定），用于可疑边界复核
+direction_bucket = TokenBucket(1.2)  # directionlite AK 级并发配额很紧（实测>1并发偶发401限流），可疑边界复核用更保守速率
 http_session: httpx.AsyncClient | None = None
 
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://127.0.0.1:8010")
@@ -102,6 +102,62 @@ async def health():
     return {"status": "ok", "mode": "mock" if settings.mock_mode else "live", "time": time.time()}
 
 
+@app.get("/api/__probe2")
+async def probe2_clamp():
+    """离线验证：mock 全垃圾方向 + 真实 WaterGuard，确认服务进程内统一水域确认 clamp 生效。"""
+    from .core import isochrone as _iso
+    from .core.water_guard import WaterGuard
+
+    class _AllJunk:
+        async def walking_direction(self, origin, destination):
+            return {"duration_s": 0, "distance_m": 1}
+
+    wg = WaterGuard(
+        http_session, radius_m=settings.water_guard_radius_m,
+        overpass_url=settings.overpass_url,
+        cache_path=str(Path(__file__).resolve().parent.parent.parent / "data" / "water_cache.sqlite"),
+        local_geojson=str(Path(__file__).resolve().parent.parent.parent / "data" / "water_polygons.json"),
+        margin_m=settings.water_guard_margin_m,
+        enabled=True,
+    )
+    cl = _AllJunk()
+    out = await _iso.refine_boundaries(24.741355, 102.694037, [(315.0, 971.0), (270.0, 1072.0)], cl, 900.0, 100.0, 2000.0, max_refines=10, water_guard=wg)
+    return {"out": out}
+
+
+@app.get("/api/__probe")
+async def probe_code():
+    import inspect as _inspect
+    import math
+    import app.core.isochrone as _iso
+    import app.core.water_guard as _wg
+    from .core.water_guard import WaterGuard
+    src = _inspect.getsource(_iso)
+    out = {
+        "isochrone_file": _iso.__file__,
+        "has_unified_clamp": "统一水域确认" in src,
+        "has_ratio_11": ">= 1.1" in src,
+        "has_log_probe": "水域确认 方向" in src,
+        "water_guard_file": _wg.__file__,
+    }
+    try:
+        wg = WaterGuard(
+            http_session, radius_m=settings.water_guard_radius_m,
+            overpass_url=settings.overpass_url,
+            cache_path=str(Path(__file__).resolve().parent.parent.parent / "data" / "water_cache.sqlite"),
+            local_geojson=str(Path(__file__).resolve().parent.parent.parent / "data" / "water_polygons.json"),
+            margin_m=settings.water_guard_margin_m,
+            enabled=True,
+        )
+        out["local_polys"] = len(wg._local_polys)
+        out["local_bboxes"] = len(wg._local_bboxes)
+        blng, blat = _iso.offset_lnglat(102.694037, 24.741355, 971.0 * math.sin(math.radians(315)), 971.0 * math.cos(math.radians(315)))
+        out["is_water_315_971"] = await wg.is_water((24.741355, 102.694037), (blat, blng))
+    except Exception as exc:
+        out["probe_wg_err"] = repr(exc)[:200]
+    return out
+
+
 @app.get("/api/config")
 async def config():
     return {
@@ -120,6 +176,20 @@ async def inspect(req: InspectRequest):
     if req.center is None and not req.address:
         raise HTTPException(status_code=400, detail="请提供 center 坐标或 address 地址")
     client = _make_client()
+    # 水域仲裁（仅 live 模式）：百度算路对水域/未建模绿道同返 0s/1m 垃圾，
+    # 用水体多边形区分"湖面(该内缩)"与"绿道(该保留)"；优先本地数据（随项目
+    # 分发，无网络依赖），Overpass 仅作网络兜底。mock 模式不启用。
+    water_guard = None
+    if not settings.mock_mode and settings.water_guard_enabled:
+        from .core.water_guard import WaterGuard
+        water_guard = WaterGuard(
+            http_session, radius_m=settings.water_guard_radius_m,
+            overpass_url=settings.overpass_url,
+            cache_path=str(Path(__file__).resolve().parent.parent.parent / "data" / "water_cache.sqlite"),
+            local_geojson=str(Path(__file__).resolve().parent.parent.parent / "data" / "water_polygons.json"),
+            margin_m=settings.water_guard_margin_m,
+            enabled=True,
+        )
     warnings: list[str] = []
     mode = "mock" if settings.mock_mode else "live"
 
@@ -175,7 +245,7 @@ async def inspect(req: InspectRequest):
     # 3) 等时圈
     try:
         iso = await isochrone.compute_isochrone(
-            center["lat"], center["lng"], client, settings, walk_minutes, bucket=bucket
+            center["lat"], center["lng"], client, settings, walk_minutes, bucket=bucket, water_guard=water_guard
         )
     except Exception as exc:
         warnings.append(f"等时圈计算失败({exc})，已降级为演示数据")

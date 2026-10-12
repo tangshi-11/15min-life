@@ -1,0 +1,23 @@
+﻿ang=315.0 bd=971.0 -> t=0.0s d=1.0m
+   probe 1554m -> t=0.0s d=1.0m ratio=0.00
+   is_water(315.0,971m) = True
+ang=337.5 bd=971.0 -> t=0.0s d=1.0m
+   probe 1554m -> t=0.0s d=1.0m ratio=0.00
+   is_water(337.5,971m) = True
+ang=345.0 bd=971.0 -> t=0.0s d=1.0m
+   probe 1554m -> t=155.0s d=181.0m ratio=0.12
+   is_water(345.0,971m) = True
+ang=352.5 bd=971.0 -> t=0.0s d=1.0m
+   probe 1554m -> t=402.0s d=470.0m ratio=0.30
+   is_water(352.5,971m) = True
+python.exe : 请求失败(第1次): 百度API错误 status=401 当前并发量已经超过约定并发配额，限制访问，0.8s 后重试
+所在位置 行:1 字符: 49
++ ... e\backend"; & ".\.venv\Scripts\python.exe" -u _diag_nw.py 2>&1 | Out- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (请求失败(第1次): 百度AP...额，限制访问，0.8s 后重试:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+请求失败(第2次): 百度API错误 status=401 当前并发量已经超过约定并发配额，限制访问，1.6s 后重试
+ang=0.0 bd=971.0 -> t=112.0s d=131.0m
+   probe 1554m -> t=1120.0s d=1309.0m ratio=0.84
+   is_water(0.0,971m) = True

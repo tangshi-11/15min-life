@@ -1,0 +1,12 @@
+INFO:     Started server process [23932]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+请求失败(第1次): 百度API错误 status=302 天配额超限，限制访问，1.2s 后重试
+请求失败(第2次): 百度API错误 status=302 天配额超限，限制访问，2.4s 后重试
+请求失败(第3次): 百度API错误 status=302 天配额超限，限制访问，4.8s 后重试
+请求失败(第4次): 百度API错误 status=302 天配额超限，限制访问，9.6s 后重试
+请求失败(第5次): 百度API错误 status=302 天配额超限，限制访问，19.2s 后重试
+请求失败(第1次): 百度API错误 status=401 当前并发量已经超过约定并发配额，限制访问，0.6s 后重试
+请求失败(第2次): 百度API错误 status=401 当前并发量已经超过约定并发配额，限制访问，1.2s 后重试
+请求失败(第3次): 百度API错误 status=401 当前并发量已经超过约定并发配额，限制访问，2.4s 后重试

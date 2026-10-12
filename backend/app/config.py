@@ -27,6 +27,14 @@ class Settings:
         self.matrix_chunk: int = int(os.getenv("MATRIX_CHUNK", "90"))
         self.grid_n: int = int(os.getenv("GRID_N", "60"))
         self.review_directions: int = int(os.getenv("REVIEW_DIRECTIONS", "48"))
+        # 复核阈值：只复核采样边界 ≥ 该距离的方向。百度 directionlite 免费 AK 并发配额极紧，
+        # 48 方向全复核 + 水域探测会触发 401 限流；小边界方向（<600m）即使有水域误差也贴岸，
+        # 视觉影响可忽略，跳过复核可把请求量降一半，避免配额耗尽导致方向被错误内缩。
+        self.review_min_boundary_m: float = float(os.getenv("REVIEW_MIN_BOUNDARY_M", "600"))
+        self.water_guard_enabled: bool = _flag(os.getenv("WATER_GUARD_ENABLED", "true"))
+        self.water_guard_radius_m: float = float(os.getenv("WATER_GUARD_RADIUS_M", "3500"))
+        self.water_guard_margin_m: float = float(os.getenv("WATER_GUARD_MARGIN_M", "300"))
+        self.overpass_url: str = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
         self.poi_radius_m: float = float(os.getenv("POI_RADIUS_M", "2500"))
         self.blind_radius_m: float = float(os.getenv("BLIND_RADIUS_M", "1000"))
         self.blind_cell_m: float = float(os.getenv("BLIND_CELL_M", "200"))

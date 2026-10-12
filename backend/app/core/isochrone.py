@@ -248,6 +248,8 @@ async def refine_boundaries(
     step_m: float,
     max_radius_m: float,
     max_refines: int = 48,
+    review_min_boundary_m: float = 600.0,
+    water_guard: Any = None,
 ) -> list[tuple[float, float]]:
     """单点步行算路复核全部方向边界，修正批量接口对水域/异常点的直线口径误差。
 
@@ -256,22 +258,27 @@ async def refine_boundaries(
     方向也会因采样粒度被低估。这里对全部方向（默认 48，REVIEW_DIRECTIONS 可调）用轻量
     单点算路(directionlite)复核：
     - 真实耗时 > 阈值 → 向内二分，取"≤阈值的最远点"（内缩，最多 2 次收敛到 ~150m）；
-    - 真实耗时 明显 < 阈值 → 向外探测更远采样点（外扩，最多 2 步）。
+    - 真实耗时 明显 < 阈值 → 向外探测更远采样点（外扩，最多 2 步）；
+    - 复核返回 0s/1m 垃圾数据（水域与未建模绿道同症状）→ 用 OSM 水域多边形仲裁：
+      落在水体多边形内 → 内缩（真水域）；否则 → 保持采样边界（绿道/步道可保留）。
     复核失败（配额/异常）→ 保持原边界（安全降级，不影响主流程）。
 
     boundaries: [(角度, 距离米)]，中心为 (center_lat, center_lng)（BD-09）。
+    water_guard: 提供 async is_water(center_ll, point_ll)->bool（BD-09）的仲裁器；
+                 为 None 时垃圾数据方向一律保守内缩（防盖水）。
     """
     if not boundaries:
         return boundaries
-    # 均匀角度抽样：按角度等间隔取 max_refines 个方向复核（保证修正覆盖全圈）。
-    # 批量接口的误差不只看"偏离中位数"（如个别方向被系统性低估/高估但数值看着正常），
-    # 均匀抽样能以最少复核次数覆盖全角度；默认 48 = 全方向复核，杜绝水域方向漏网。
-    sorted_b = sorted(boundaries)  # 按角度升序
-    step_ang = 360.0 / max_refines
-    suspects = set()
-    for k in range(max_refines):
-        target = k * step_ang
-        suspects.add(min(sorted_b, key=lambda t: abs(((t[0] - target) + 180) % 360 - 180))[0])
+    # 只复核"采样边界足够大"的方向（默认 ≥600m）：
+    # 批量接口(routematrix)对水域/异常点有直线口径误差，会把湖面/河道方向的可达边界推得过远；
+    # 边界 <600m 的方向即使有水域误差也只影响贴岸 ~600m，视觉可忽略，跳过可大幅降低
+    # directionlite 请求量（免费 AK 并发配额极紧，全方向复核会触发 401 限流导致误内缩）。
+    # 大边界方向（≥600m）全复核 + 垃圾数据探测仲裁，既保绿道也不盖水。
+    threshold = max(1.0, review_min_boundary_m)
+    suspects = {ang for ang, bd in boundaries if bd >= threshold}
+    if not suspects:
+        # 全方向小边界（异常场景）：保守复核最远方向，防极端漏网
+        suspects = {max(boundaries, key=lambda t: t[1])[0]}
     out: list[tuple[float, float]] = []
     for ang, bd in boundaries:
         if ang not in suspects:
@@ -290,7 +297,9 @@ async def refine_boundaries(
 
         async def _refine_inward() -> float:
             """沿方向向内二分，找 ≤limit_s 的最远点（2 次收敛到 ~150m）。
-            二分点同样做疑似校验：水域点按超时处理，继续向内收缩。"""
+            二分点同样做疑似校验：水域点按超时处理，继续向内收缩。
+            （二分点的绿道仲裁依赖主复核的探测结论——主复核已把绿道方向保留，
+            走到内缩的必然是水面/超时方向，二分点垃圾按超时处理是正确且省配额的。）"""
             lo, hi = 0.0, bd
             best = step_m * 0.5
             for _ in range(2):
@@ -311,6 +320,7 @@ async def refine_boundaries(
                     hi = mid
             return max(best, step_m * 0.5)
 
+        kept_by_probe = False  # 绿道/未建模步道（探测恢复正常）→ 豁免粗 OSM 水域误判
         try:
             rad = math.radians(ang)
             lng, lat = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
@@ -318,10 +328,54 @@ async def refine_boundaries(
             t = float(info["duration_s"])
             d = float(info.get("distance_m", 0.0))
             if _suspect(t, d, bd):
-                # 水域/无效复核：不能信任结果（批量口径已把边界推远），按向内收缩处理
-                bd = await _refine_inward()
+                # 0s/1m 垃圾数据：可能是"未建模绿道/步道"（实际可步行，应保留）
+                # 也可能是"水面"（不可步行，应内缩）。仅靠算路接口本身无法区分，
+                # 采用"探测更远点"仲裁（实测验证）：
+                #   - 更远点恢复正常算路（duration≥30s 且 距离≈直线×0.8+）→ 绿道/路网缺口
+                #     （实测滇池西侧绿道：750-1050m 全 0s/1m 垃圾，1100-1200m 恢复
+                #      1246s/1455m，ratio≥1.3；取 1.6×bd 探测命中"正常带"）→ 保留
+                #   - 更远点非垃圾但距离 << 直线（水面特征，如湖面 1000-2500m 仅
+                #     131-1309m/112-1120s，ratio 0.13-0.5）→ 水面 → 内缩
+                #   - 更远点仍垃圾(0s/1m)/请求失败 → 百度对未建模绿道返回不稳定
+                #     （实测同方向 1050m 垃圾、1120m 正常），不能据此判水 → 保持边界（宁留勿砍）。
+                # 说明：水面方向通常复核点即返回非垃圾超时（如湖面 1177m→1120s/1309m），
+                # 走 `t > limit_s` 内缩路径排除，不依赖探测；探测主要用于绿道保留判定。
+                probe_dist = min(bd * 1.6, max_radius_m)
+                probe_ok = False
+                probe_nonjunk = False
+                try:
+                    plng_, plat_ = offset_lnglat(center_lng, center_lat, probe_dist * math.sin(rad), probe_dist * math.cos(rad))
+                    pinfo = await client.walking_direction((center_lat, center_lng), (plat_, plng_))
+                    pt_ = float(pinfo["duration_s"])
+                    pd_ = float(pinfo.get("distance_m", 0.0))
+                    probe_nonjunk = pt_ >= 30.0 and pd_ > 0.0
+                    # 探测距离/直线比阈值：绿道实测 1.2-2.9（1100m=1.32、1200m=1.22、
+                    # 1300m+=2.94）；湖面为"直线口径"实测仅 0.84（1554m→1309m）——
+                    # 阈值取 1.1：绿道保留、湖面内缩、正常绕行不受影响（正常方向复核
+                    # 通常不垃圾、不走探测）。
+                    probe_ok = probe_nonjunk and (pd_ / probe_dist) >= 1.1
+                except Exception as exc:
+                    logger.warning("方向 %.1f° 水域探测失败：%s", ang, exc)
+                if not probe_ok and probe_nonjunk:
+                    # 探测非垃圾但距离明显小于直线（水面特征）→ 内缩（防盖水）
+                    bd = await _refine_inward()
+                # probe_ok=True：绿道/未建模步道 → 保持采样边界（探测保留，豁免水域误判）；
+                # 探测垃圾/失败 → 保持（宁留勿砍）
+                if probe_ok:
+                    kept_by_probe = True
             elif t > limit_s:
                 bd = await _refine_inward()
+                # 复核超时内缩后仍≥500m：可能是水面"直线口径"残留（directionlite 对
+                # 近岸水面 500-1200m 返回近似直线耗时≤阈值，被当可达保留，实测滇池北侧
+                # 958m 处仍可达但实为水面）。用 OSM 水体数据确认：判水则贴岸 clamp 300m。
+                if water_guard is not None and bd >= 500.0:
+                    try:
+                        blng_, blat_ = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
+                        in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_))
+                        if in_water:
+                            bd = min(bd, 300.0)
+                    except Exception as exc:
+                        logger.warning("方向 %.1f° 水域复核失败，保持内缩边界：%s", ang, exc)
             elif t < limit_s * 0.9:
                 # 外扩：仅当复核结果可信（非水域垃圾数据）时向外探测最多 2 步
                 for k in range(1, 3):
@@ -343,6 +397,18 @@ async def refine_boundaries(
                         break
         except Exception as exc:
             logger.warning("方向 %.1f° 单点复核失败，保持原边界：%s", ang, exc)  # 安全降级
+        # 统一水域确认（探测保留的绿道豁免）：复核可达保留/外扩的方向若最终边界≥500m，
+        # 用 OSM 水体数据二次确认，判水则贴岸 300m。解决 directionlite 对近岸水面
+        # 500-1200m 返回"近似直线耗时≤阈值"被当可达的盖水残留（实测滇池北侧 958m）。
+        if not kept_by_probe and water_guard is not None and bd >= 500.0:
+            try:
+                blng_, blat_ = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
+                in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_))
+                logger.info("水域确认 方向 %.1f° bd=%.0fm kept=%s in_water=%s", ang, bd, kept_by_probe, in_water)
+                if in_water:
+                    bd = min(bd, 300.0)
+            except Exception as exc:
+                logger.warning("方向 %.1f° 统一水域复核失败，保持边界：%s", ang, exc)
         out.append((ang, bd))
     return out
 
@@ -354,11 +420,14 @@ async def compute_isochrone(
     cfg: Any,
     walk_minutes: int | None = None,
     bucket: Any | None = None,
+    water_guard: Any = None,
 ) -> dict:
     """计算 15 分钟步行等时圈。
 
     client: 提供 route_matrix_walking(origins, destinations) -> {"elements": [...]} 的客户端
             （BaiduClient 或 MockBaiduClient）。
+    water_guard: OSM 水域仲裁器（WaterGuard），用于区分垃圾算路数据中的
+                 真水域（内缩）与未建模绿道（保留）；None 时垃圾方向一律内缩。
     """
     limit_s = (walk_minutes or cfg.walking_minutes) * 60
     rays = build_rays(center_lat, center_lng, cfg.directions, cfg.step_m, cfg.max_radius_m)
@@ -381,6 +450,8 @@ async def compute_isochrone(
         boundaries = await refine_boundaries(
             center_lat, center_lng, boundaries, client, limit_s, cfg.step_m, cfg.max_radius_m,
             max_refines=cfg.review_directions,
+            review_min_boundary_m=getattr(cfg, "review_min_boundary_m", 600.0),
+            water_guard=water_guard,
         )
     except Exception as exc:  # 复核整体失败不阻断主流程
         logger.warning("边界单点复核失败，使用采样边界：%s", exc)

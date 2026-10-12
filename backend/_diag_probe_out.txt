@@ -1,0 +1,8 @@
+﻿西1000m: {'duration_s': 1232, 'distance_m': 1438}
+西1200m: {'duration_s': 1246, 'distance_m': 1455}
+西1500m: {'duration_s': 3824, 'distance_m': 4419}
+北1000m: {'duration_s': 112, 'distance_m': 131}
+北1500m: {'duration_s': 1120, 'distance_m': 1309}
+北2000m: {'duration_s': 1120, 'distance_m': 1309}
+北2500m: {'duration_s': 1120, 'distance_m': 1309}
+南800m: {'duration_s': 3178, 'distance_m': 3665}

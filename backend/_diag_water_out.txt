@@ -1,0 +1,12 @@
+﻿中心点(岸边): in_water=False
+北侧湖面500m: in_water=True
+北侧湖面1500m: in_water=True
+北侧湖面2500m: in_water=True
+西侧绿道300m: in_water=True
+西侧绿道500m: in_water=True
+西侧绿道700m: in_water=True
+东侧陆地500m: in_water=False
+东南陆地700m: in_water=False
+南侧湿地400m: in_water=False
+南侧湿地800m: in_water=False
+东侧2000m远: in_water=False

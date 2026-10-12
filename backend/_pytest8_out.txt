@@ -1,0 +1,21 @@
+﻿.........F.........                                                      [100%]
+================================== FAILURES ===================================
+______________________ test_refine_water_garbage_shrinks ______________________
+
+    @pytest.mark.asyncio
+    async def test_refine_water_garbage_shrinks():
+        """水域垃圾复核（0s/1m）：绝不能按'可达且富余'外扩，必须向内收缩。
+        实测 directionlite 对滇池湖面点返回 0s/1m，旧逻辑误走外扩把等时圈推到湖心 2km。"""
+        o = (25.0406, 102.7146)
+        client = _WaterGarbageClient()
+        bounds = [(0.0, 2000.0), (90.0, 1500.0), (180.0, 1200.0), (270.0, 2000.0)]
+        out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10)
+        for (_, orig), (_, ref) in zip(bounds, out):
+>           assert ref < orig - 100.0, "水域垃圾数据必须内缩，禁止外扩"
+E           AssertionError: 水域垃圾数据必须内缩，禁止外扩
+E           assert 2000.0 < (2000.0 - 100.0)
+
+tests\test_isochrone.py:177: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_isochrone.py::test_refine_water_garbage_shrinks - Assertion...
+1 failed, 18 passed in 0.66s

@@ -1,0 +1,12 @@
+﻿西750m: {'duration_s': 0, 'distance_m': 1}
+西800m: {'duration_s': 0, 'distance_m': 1}
+西850m: {'duration_s': 0, 'distance_m': 1}
+西900m: {'duration_s': 0, 'distance_m': 1}
+西950m: {'duration_s': 0, 'distance_m': 1}
+西1000m: {'duration_s': 0, 'distance_m': 1}
+西1050m: {'duration_s': 0, 'distance_m': 1}
+西1100m: {'duration_s': 1246, 'distance_m': 1455}
+西1200m: {'duration_s': 1272, 'distance_m': 1485}
+西1300m: {'duration_s': 3824, 'distance_m': 4419}
+西1400m: {'duration_s': 3824, 'distance_m': 4419}
+西1500m: {'duration_s': 3824, 'distance_m': 4419}

@@ -1,0 +1,3 @@
+﻿西700m边界: {'duration_s': 0, 'distance_m': 1}
+西1050m探测: {'duration_s': 0, 'distance_m': 1}
+refine(270,700) -> [(270.0, 50.0)]  (0.3s)
