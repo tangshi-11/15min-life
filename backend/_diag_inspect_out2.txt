@@ -1,7 +1,0 @@
-﻿elapsed=58.1s
-area_km2= 0.2262
-max_reach_m= 1260.9
-polygon_pts= 40
-bbox lat 102.694373 102.701537 lng 24.739096 24.745179
-max_lat_diff_m= 8617719.0
-min_lng_diff_m= 8677944.0

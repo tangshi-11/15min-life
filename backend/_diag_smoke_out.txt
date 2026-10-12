@@ -1,3 +1,0 @@
-﻿西700.0m: {'duration_s': 0, 'distance_m': 1}
-西1120.0m: {'duration_s': 1249, 'distance_m': 1458}
-西1500.0m: {'duration_s': 3824, 'distance_m': 4419}
