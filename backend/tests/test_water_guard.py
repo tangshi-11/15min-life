@@ -57,3 +57,18 @@ async def test_is_water_disabled():
     """未启用 → 一律 True（按水域保守处理）。"""
     wg = WaterGuard(enabled=False)
     assert await wg.is_water((24.741, 102.694), (24.746, 102.694)) is True
+
+
+@pytest.mark.asyncio
+async def test_is_water_center_point_guard():
+    """中心点判水：岸边中心点（距岸<300m）允许；湖中央中心点拒绝。"""
+    lake = [[102.66, 24.744], [102.72, 24.744], [102.72, 24.80], [102.66, 24.80]]
+    bboxes = [[102.66, 24.744, 102.72, 24.80]]
+    with tempfile.TemporaryDirectory() as td:
+        f = Path(td) / "water_polygons.json"
+        f.write_text(json.dumps({"polys": [lake], "bboxes": bboxes}), encoding="utf-8")
+        wg = WaterGuard(session=None, cache_path=None, enabled=True, local_geojson=str(f))
+        # 岸边中心点（距多边形南边界 ~294m < 300m 缓冲）→ 陆地，允许体检
+        assert await wg.is_water((24.741355, 102.694037), (24.741355, 102.694037)) is False
+        # 湖中央中心点（距边界 > 300m）→ 水域，应拒绝
+        assert await wg.is_water((24.7650, 102.6900), (24.7650, 102.6900)) is True

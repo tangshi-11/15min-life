@@ -208,6 +208,21 @@ async def inspect(req: InspectRequest):
     if center is None:
         raise HTTPException(status_code=500, detail="中心点解析失败")
 
+    # 1.5) 中心点合法性：位于开阔水面（距岸边超过 margin）则拒绝。
+    # 纯本地水体多边形判断（不消耗百度算路配额），避免"中心点定到水上 →
+    # 等时圈从水上扩散覆盖湖面"。
+    if water_guard is not None:
+        try:
+            if await water_guard.is_water((center["lat"], center["lng"]), (center["lat"], center["lng"])):
+                raise HTTPException(
+                    status_code=400,
+                    detail="中心点位于开阔水面（距岸边超过300m），请选择陆地位置",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("中心点水域检查失败，忽略：%s", exc)
+
     # 2) 逆地理编码（地址标签 + 所在街道/区县）
     admin = {"district": "", "town": "", "boundary": []}
     try:
