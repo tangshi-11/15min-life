@@ -55,7 +55,9 @@
     dlng = (dlng * 180) / (6378245 / sqrtmagic * Math.cos(radlat) * Math.PI);
     return [lng + dlng, lat + dlat];
   }
-  function bd09ToWgs84(lng, lat) { var g = bd09ToGcj02(lng, lat); return gcj02ToWgs84(g[0], g[1]); }
+  // 底图为高德 GCJ-02 瓦片：矢量数据（BD-09）统一转 GCJ-02 对齐瓦片真实位置，
+  // 避免 WGS84 叠加造成 ~百米的点位偏移（POI"瞎标"感）。
+  function bd09ToWgs84(lng, lat) { return bd09ToGcj02(lng, lat); }
   function wgs84ToBd09(lng, lat) { var g = wgs84ToGcj02(lng, lat); return gcj02ToBd09(g[0], g[1]); }
 
   /* ---------- 常量与状态 ---------- */
@@ -67,25 +69,14 @@
 
   var map = L.map("map").setView([25.0406, 102.7146], 15);
 
-  /* ---------- 底图：多源自动切换 ----------
-   * 国内网络下 openstreetmap/carto/esri 常不可达，实测高德瓦片可稳定加载，
-   * 因此高德优先，其余作为国际网络下的备用源；瓦片加载失败时自动换下一源。 */
+  /* ---------- 底图：固定高德（GCJ-02） ----------
+   * 矢量数据统一转 GCJ-02 对齐高德瓦片。不降级到 CARTO/OSM/Esri——
+   * 那些是 WGS-84 坐标系，降级后数据（GCJ）叠加偏移 ~600m，造成
+   * POI"瞎标"和等时圈"穿水"假象。高德瓦片国内稳定，失败仅重试。 */
   var TILE_SOURCES = [
     {
       url: "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}",
       options: { maxZoom: 18, subdomains: "1234", attribution: "&copy; 高德地图（演示底图）" }
-    },
-    {
-      url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      options: { maxZoom: 19, subdomains: "abcd", attribution: "&copy; OpenStreetMap contributors &copy; CARTO" }
-    },
-    {
-      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-      options: { maxZoom: 19, attribution: "Tiles &copy; Esri" }
-    },
-    {
-      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      options: { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }
     }
   ];
   var baseLayer = null, tileErrors = 0;
@@ -94,10 +85,8 @@
     if (idx >= TILE_SOURCES.length) return;
     tileErrors = 0;
     baseLayer = L.tileLayer(TILE_SOURCES[idx].url, TILE_SOURCES[idx].options).addTo(map);
-    baseLayer.on("tileerror", function () {
-      tileErrors++;
-      if (tileErrors >= 8) loadBase(idx + 1);
-    });
+    // 高德瓦片失败仅计数（重试由 Leaflet 自动），不切换坐标系底图
+    baseLayer.on("tileerror", function () { tileErrors++; });
   }
   loadBase(0);
 
@@ -311,8 +300,21 @@
     });
   }
 
-  function renderPois(pois) {
+  // 射线法：点是否在多边形内（BD-09 同口径比较）
+  function pointInPolygon(lng, lat, poly) {
+    if (!poly || poly.length < 3) return true;
+    var inside = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+
+  function renderPois(pois, isoPoly) {
     pois.forEach(function (p) {
+      // 只标注等时圈内的设施（检索半径 > 圈半径，圈外点不显示避免"乱标"）
+      if (isoPoly && !pointInPolygon(p.lng, p.lat, isoPoly)) return;
       var w = bd09ToWgs84(p.lng, p.lat);
       L.circleMarker([w[1], w[0]], {
         radius: 5, color: "#fff", weight: 1,
@@ -377,7 +379,7 @@
     if (data.isochrone.grid) renderGrid(data.isochrone.grid);
     renderIso(data.isochrone);
     renderBlind(data.blind_spots);
-    renderPois(data.pois || []);
+    renderPois(data.pois || [], data.isochrone ? (data.isochrone.polygon || data.isochrone.boundary_polygon) : null);
     renderLegend();
 
     var cov = data.coverage;
