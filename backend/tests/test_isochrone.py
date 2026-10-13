@@ -126,11 +126,21 @@ async def test_refine_mock_keeps_boundary():
     assert all(40.0 <= d <= 2000.0 for _, d in out), "边界应保持合理范围"
 
 
+class _WaterTimeoutClient:
+    """水域直线口径：复核/探测均超时且距离远小于直线（百度最近路网点口径，实测 0.70-0.84）。"""
+
+    async def walking_direction(self, origin, destination):
+        dlng = (destination[1] - origin[1]) * 111320.0
+        dlat = (destination[0] - origin[0]) * 110540.0
+        dist = math.hypot(dlng, dlat)
+        return {"duration_s": 1800.0 + dist, "distance_m": dist * 0.7}
+
+
 @pytest.mark.asyncio
 async def test_refine_inner_shrink_on_water():
-    """水域直线口径：批量说可达(远)，单点复核超时 → 内缩。"""
+    """水域直线口径：批量说可达(远)，单点复核超时 + 探测仍直线口径低 ratio → 内缩。"""
     o = (25.0406, 102.7146)
-    client = _FakeClient(sec_at=lambda d: 1800.0 + d)
+    client = _WaterTimeoutClient()
     bounds = [(0.0, 800.0), (90.0, 1200.0), (180.0, 600.0), (270.0, 1500.0)]
     out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10)
     for (_, orig), (_, ref) in zip(bounds, out):
@@ -316,4 +326,77 @@ async def test_refine_garbage_probe_bad_shrinks():
     (_, orig), (_, ref) = bounds[0], out[0]
     assert ref < orig - 100.0, "探测仍异常说明是水面，必须内缩"
     assert ref > 40.0
+
+
+class _TimeoutThenProbeOk:
+    """模拟绿道场景：复核点非垃圾但超时（真实绕行 15 分钟走不到），探测点恢复正常大绕行。"""
+
+    async def walking_direction(self, origin, destination):
+        dlng = (destination[1] - origin[1]) * 111320.0
+        dlat = (destination[0] - origin[0]) * 110540.0
+        dist = math.hypot(dlng, dlat)
+        if dist > 1500.0:  # 探测点（1.6×1072≈1715m）：绿道真实绕行（ratio 2.58）
+            return {"duration_s": 3824, "distance_m": 4419}
+        return {"duration_s": 1246, "distance_m": 1455}  # 复核点：超时但非垃圾
+
+
+class _TimeoutThenProbeLow:
+    """模拟水面场景：复核点超时（直线口径），探测点仍直线口径低 ratio。"""
+
+    async def walking_direction(self, origin, destination):
+        dlng = (destination[1] - origin[1]) * 111320.0
+        dlat = (destination[0] - origin[0]) * 110540.0
+        dist = math.hypot(dlng, dlat)
+        return {"duration_s": 1120, "distance_m": 1309}  # 复核/探测均直线口径（0.70）
+
+
+class _TimeoutThenProbeEdge:
+    """模拟正常陆地复核超时边缘：探测 ratio≈1.0（0.95-1.1 区间）→ 应保持。"""
+
+    async def walking_direction(self, origin, destination):
+        dlng = (destination[1] - origin[1]) * 111320.0
+        dlat = (destination[0] - origin[0]) * 110540.0
+        dist = math.hypot(dlng, dlat)
+        if dist > 1500.0:  # 探测点（1.6×1177≈1883m）：正常绕行系数 ratio≈1.0
+            return {"duration_s": 950, "distance_m": 1900}
+        return {"duration_s": 1246, "distance_m": 1455}  # 复核点：超时
+
+
+@pytest.mark.asyncio
+async def test_refine_timeout_probe_ok_keeps_greenway():
+    """复核超时 + 探测恢复大绕行（绿道真实路径）→ 保留边界，豁免 OSM 水域误判。
+    实测滇池东岸：270° 复核 1072m→1246s/1455m 超时，探测 1715m→3824s/4419m（ratio 2.58）。"""
+    o = (24.741355, 102.694037)
+    client = _TimeoutThenProbeOk()
+    wg = _WaterGuardMock(in_water=True)  # 粗 OSM 判水 → 探测保留必须豁免
+    bounds = [(270.0, 1072.0)]
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10, water_guard=wg)
+    (_, ref) = out[0]
+    assert ref == 1072.0, "复核超时但探测恢复正常（绿道真实绕行）应保留并豁免水域误判"
+
+
+@pytest.mark.asyncio
+async def test_refine_timeout_probe_low_shrinks():
+    """复核超时 + 探测仍直线口径低 ratio（水面）→ 内缩排除。
+    实测滇池北侧湖面：1177m→1120s/1309m，探测 1883m 仍 1309m（ratio 0.70）。"""
+    o = (24.741355, 102.694037)
+    client = _TimeoutThenProbeLow()
+    wg = _WaterGuardMock(in_water=True)
+    bounds = [(0.0, 1177.0)]
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10, water_guard=wg)
+    (_, ref) = out[0]
+    assert ref < 500.0, "复核超时且探测仍直线口径（水面）应内缩排除"
+
+
+@pytest.mark.asyncio
+async def test_refine_timeout_probe_edge_keeps():
+    """复核超时 + 探测 ratio≈1.0（正常陆地边缘，0.95-1.1 区间）→ 保持（宁留勿砍）。
+    防止正常陆地复核超时被探测仲裁误判水面内缩。"""
+    o = (24.741355, 102.694037)
+    client = _TimeoutThenProbeEdge()
+    wg = _WaterGuardMock(in_water=False)
+    bounds = [(0.0, 1177.0)]
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10, water_guard=wg)
+    (_, ref) = out[0]
+    assert ref == 1177.0, "正常陆地边缘（探测 ratio 0.95-1.1）应保持边界"
 

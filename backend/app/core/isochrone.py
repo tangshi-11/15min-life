@@ -321,6 +321,39 @@ async def refine_boundaries(
             return max(best, step_m * 0.5)
 
         kept_by_probe = False  # 绿道/未建模步道（探测恢复正常）→ 豁免粗 OSM 水域误判
+
+        async def _probe_ratio() -> float | None:
+            """向 1.6×bd 处探测，返回 距离/直线比；垃圾(0s/1m)或失败返回 None。
+            实测区分（滇池东岸验收点）：
+            - 绿道/真实大绕行：2.58-2.95（270° 探测 1715m→4419m）
+            - 湖面直线口径：0.70-0.84（0° 1554m→1309m、345°→0.12、352.5°→0.30）
+            - 正常陆地（复核超时边缘）：≈1.0-1.3
+            仲裁：≥1.1 → 绿道保留；≤0.95 → 水面内缩；0.95-1.1 → 正常陆地边缘保持。"""
+            probe_dist = min(bd * 1.6, max_radius_m)
+            try:
+                plng_, plat_ = offset_lnglat(center_lng, center_lat, probe_dist * math.sin(rad), probe_dist * math.cos(rad))
+                pinfo = await client.walking_direction((center_lat, center_lng), (plat_, plng_))
+                pt_ = float(pinfo["duration_s"])
+                pd_ = float(pinfo.get("distance_m", 0.0))
+                if pt_ < 30.0 or pd_ <= 0.0:
+                    return None
+                return pd_ / probe_dist
+            except Exception as exc:
+                logger.warning("方向 %.1f° 水域探测失败：%s", ang, exc)
+                return None
+
+        async def _apply_probe_arbitration():
+            """探测仲裁三分支：绿道保留 / 水面内缩 / 正常陆地边缘保持。返回 True 表示保留。"""
+            nonlocal bd
+            ratio = await _probe_ratio()
+            if ratio is None:
+                return False  # 探测垃圾/失败 → 保持（宁留勿砍）
+            if ratio >= 1.1:
+                return True  # 绿道/未建模步道（大绕行）→ 保留
+            if ratio <= 0.95:
+                bd = await _refine_inward()  # 水面直线口径 → 内缩
+            return False  # 0.95-1.1：正常陆地边缘 → 保持
+
         try:
             rad = math.radians(ang)
             lng, lat = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
@@ -339,36 +372,22 @@ async def refine_boundaries(
                 #   - 更远点仍垃圾(0s/1m)/请求失败 → 百度对未建模绿道返回不稳定
                 #     （实测同方向 1050m 垃圾、1120m 正常），不能据此判水 → 保持边界（宁留勿砍）。
                 # 说明：水面方向通常复核点即返回非垃圾超时（如湖面 1177m→1120s/1309m），
-                # 走 `t > limit_s` 内缩路径排除，不依赖探测；探测主要用于绿道保留判定。
-                probe_dist = min(bd * 1.6, max_radius_m)
-                probe_ok = False
-                probe_nonjunk = False
-                try:
-                    plng_, plat_ = offset_lnglat(center_lng, center_lat, probe_dist * math.sin(rad), probe_dist * math.cos(rad))
-                    pinfo = await client.walking_direction((center_lat, center_lng), (plat_, plng_))
-                    pt_ = float(pinfo["duration_s"])
-                    pd_ = float(pinfo.get("distance_m", 0.0))
-                    probe_nonjunk = pt_ >= 30.0 and pd_ > 0.0
-                    # 探测距离/直线比阈值：绿道实测 1.2-2.9（1100m=1.32、1200m=1.22、
-                    # 1300m+=2.94）；湖面为"直线口径"实测仅 0.84（1554m→1309m）——
-                    # 阈值取 1.1：绿道保留、湖面内缩、正常绕行不受影响（正常方向复核
-                    # 通常不垃圾、不走探测）。
-                    probe_ok = probe_nonjunk and (pd_ / probe_dist) >= 1.1
-                except Exception as exc:
-                    logger.warning("方向 %.1f° 水域探测失败：%s", ang, exc)
-                if not probe_ok and probe_nonjunk:
-                    # 探测非垃圾但距离明显小于直线（水面特征）→ 内缩（防盖水）
-                    bd = await _refine_inward()
-                # probe_ok=True：绿道/未建模步道 → 保持采样边界（探测保留，豁免水域误判）；
-                # 探测垃圾/失败 → 保持（宁留勿砍）
-                if probe_ok:
+                # 走 `t > limit_s` 内缩路径排除；探测仲裁对复核垃圾与复核超时都适用。
+                if await _apply_probe_arbitration():
+                    # ratio≥1.1：绿道/未建模步道 → 保持采样边界（探测保留，豁免水域误判）
                     kept_by_probe = True
             elif t > limit_s:
-                bd = await _refine_inward()
-                # 复核超时内缩后仍≥500m：可能是水面"直线口径"残留（directionlite 对
-                # 近岸水面 500-1200m 返回近似直线耗时≤阈值，被当可达保留，实测滇池北侧
-                # 958m 处仍可达但实为水面）。用 OSM 水体数据确认：判水则贴岸 clamp 300m。
-                if water_guard is not None and bd >= 500.0:
+                # 复核超时：可能是真实绕行（绿道/正常陆地超时边缘，应保留）也可能是
+                # 水面直线口径残留（directionlite 对近岸水面返回近似直线耗时，如湖面
+                # 1177m→1120s/1309m）。向更远点探测仲裁区分（实测验证）：
+                #   ≥1.1 绿道（270° 探测 1715m→4419m ratio 2.58）→ 保留
+                #   ≤0.95 湖面（0° 1554m→1309m ratio 0.84）→ 内缩
+                #   0.95-1.1 正常陆地边缘 → 保持
+                if await _apply_probe_arbitration():
+                    kept_by_probe = True
+                elif water_guard is not None and bd >= 500.0:
+                    # 内缩后仍≥500m：可能是水面"直线口径"残留，用 OSM 水体数据确认：
+                    # 判水则贴岸 clamp 300m。
                     try:
                         blng_, blat_ = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
                         in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_))
