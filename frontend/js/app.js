@@ -165,8 +165,8 @@
       centerMarker = L.marker([w[1], w[0]], { draggable: true }).addTo(layers.center);
       centerMarker.bindTooltip("中心点（可拖拽）", { direction: "top" }).openTooltip();
       centerMarker.on("dragend", function (e) {
-        var ll = e.target.getLatLng();
-        var b = wgs84ToBd09(ll.lng, ll.lat);
+        var ll = e.target.getLatLng(); // 高德底图为 GCJ-02，直接 gcj→bd09
+        var b = gcj02ToBd09(ll.lng, ll.lat);
         currentCenter = { lat: b[1], lng: b[0] };
         document.getElementById("addressInput").value = "自定义坐标";
         inspect(); // API 已接入：拖拽红标后自动重新体检
@@ -183,7 +183,8 @@
 
   map.on("click", function (e) {
     if (mapDragging) return; // 拖拽结束的误触 click 忽略
-    var b = wgs84ToBd09(e.latlng.lng, e.latlng.lat);
+    // e.latlng 是高德底图(GCJ-02)坐标，直接 gcj→bd09，勿再经 WGS 二次转换
+    var b = gcj02ToBd09(e.latlng.lng, e.latlng.lat);
     setCenterBd(b[1], b[0], false);
     document.getElementById("addressInput").value = "自定义坐标";
   });
