@@ -12,7 +12,8 @@ __pycache__/
 Thumbs.db
 
 # 运行产物
-data/
+data/*
+!data/water_polygons.json
 logs/
 
 # 本地诊断脚本与临时输出（不入库）

@@ -1,0 +1,11 @@
+{
+  "15min_sft": {
+    "file_name": "train.json",
+    "formatting": "alpaca",
+    "columns": {
+      "prompt": "instruction",
+      "query": "input",
+      "response": "output"
+    }
+  }
+}
