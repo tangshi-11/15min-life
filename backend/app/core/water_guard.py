@@ -142,14 +142,17 @@ class WaterGuard:
     def _cache_key(lat: float, lng: float) -> tuple[str, str]:
         return f"{lat:.3f}", f"{lng:.3f}"
 
-    async def is_water(self, center_ll: tuple[float, float], point_ll: tuple[float, float]) -> bool:
+    async def is_water(self, center_ll: tuple[float, float], point_ll: tuple[float, float],
+                       margin_m: float | None = None) -> bool:
         """center_ll / point_ll 均为 BD-09。point 是否落在水体多边形内。
+        margin_m：None → 用 self.margin_m（默认 300m 缓冲带，保护岸边绿道）；
+        传 0 → 严格判水（等时圈水域仲裁用：岸边水面也排除，蓝色=水不可过）。
         未启用/数据不可用 → 返回 True（保守按水域处理，防盖水）。"""
         if not self.enabled:
             return True
         try:
             if self._local_polys:
-                return await asyncio.to_thread(self._is_water_sync, center_ll, point_ll)
+                return await asyncio.to_thread(self._is_water_sync, center_ll, point_ll, margin_m)
             # 无本地数据 → Overpass 兜底（异步网络查询）
             polys = await self._polygons_overpass_cached(center_ll)
             lat, lng = point_ll
@@ -161,16 +164,18 @@ class WaterGuard:
             logger.warning("水域仲裁失败，按水域保守处理：%s", exc)
             return True
 
-    def _is_water_sync(self, center_ll: tuple[float, float], point_ll: tuple[float, float]) -> bool:
+    def _is_water_sync(self, center_ll: tuple[float, float], point_ll: tuple[float, float],
+                       margin_m: float | None = None) -> bool:
         lat, lng = point_ll
+        margin = self.margin_m if margin_m is None else margin_m
         # 环 bbox 粗筛 + 射线法直接遍历（数千个环，每点判断 < 1ms）
         for idx, bbox in enumerate(self._local_bboxes):
             if bbox[0] <= lng <= bbox[2] and bbox[1] <= lat <= bbox[3]:
                 poly = self._local_polys[idx]
                 if point_in_polygon(lng, lat, poly):
                     # 距岸线边界 ≥ margin 才算"开阔水面"；岸边缓冲带（绿道/步道）
-                    # 判定为陆地保留（OSM 岸线常有外扩误差，岸边 300m 内不轻易判水）
-                    if point_edge_distance_m(lng, lat, poly) >= self.margin_m:
+                    # 判定为陆地保留（OSM 岸线常有外扩误差，默认岸边 300m 内不轻易判水）
+                    if point_edge_distance_m(lng, lat, poly) >= margin:
                         return True
                     return False
         return False

@@ -250,7 +250,7 @@ class _WaterGuardMock:
     def __init__(self, in_water: bool):
         self._in_water = in_water
 
-    async def is_water(self, center_ll, point_ll):
+    async def is_water(self, center_ll, point_ll, margin_m: float | None = None):
         return self._in_water
 
 

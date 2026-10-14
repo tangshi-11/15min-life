@@ -390,7 +390,7 @@ async def refine_boundaries(
                     # 判水则贴岸 clamp 300m。
                     try:
                         blng_, blat_ = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
-                        in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_))
+                        in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_), margin_m=0.0)
                         if in_water:
                             bd = min(bd, 300.0)
                     except Exception as exc:
@@ -422,7 +422,7 @@ async def refine_boundaries(
         if not kept_by_probe and water_guard is not None and bd >= 500.0:
             try:
                 blng_, blat_ = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
-                in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_))
+                in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_), margin_m=0.0)
                 logger.info("水域确认 方向 %.1f° bd=%.0fm kept=%s in_water=%s", ang, bd, kept_by_probe, in_water)
                 if in_water:
                     bd = min(bd, 300.0)
