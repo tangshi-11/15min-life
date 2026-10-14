@@ -344,9 +344,6 @@ class _TimeoutThenProbeLow:
     """模拟水面场景：复核点超时（直线口径），探测点仍直线口径低 ratio。"""
 
     async def walking_direction(self, origin, destination):
-        dlng = (destination[1] - origin[1]) * 111320.0
-        dlat = (destination[0] - origin[0]) * 110540.0
-        dist = math.hypot(dlng, dlat)
         return {"duration_s": 1120, "distance_m": 1309}  # 复核/探测均直线口径（0.70）
 
 

@@ -291,11 +291,11 @@ async def refine_boundaries(
             此时绝不能按"可达且富余"外扩，否则等时圈会被推到湖面深处。"""
             if duration_s <= 30.0:
                 return True
-            if distance_m is not None and line_dist > 0 and distance_m < line_dist * 0.5:
-                return True
-            return False
+            return distance_m is not None and line_dist > 0 and distance_m < line_dist * 0.5
 
-        async def _refine_inward() -> float:
+        rad = math.radians(ang)
+
+        async def _refine_inward(bd: float = bd, rad: float = rad) -> float:
             """沿方向向内二分，找 ≤limit_s 的最远点（2 次收敛到 ~150m）。
             二分点同样做疑似校验：水域点按超时处理，继续向内收缩。
             （二分点的绿道仲裁依赖主复核的探测结论——主复核已把绿道方向保留，
@@ -322,7 +322,7 @@ async def refine_boundaries(
 
         kept_by_probe = False  # 绿道/未建模步道（探测恢复正常）→ 豁免粗 OSM 水域误判
 
-        async def _probe_ratio() -> float | None:
+        async def _probe_ratio(bd: float = bd, rad: float = rad, ang: float = ang) -> float | None:
             """向 1.6×bd 处探测，返回 距离/直线比；垃圾(0s/1m)或失败返回 None。
             实测区分（滇池东岸验收点）：
             - 绿道/真实大绕行：2.58-2.95（270° 探测 1715m→4419m）
@@ -355,7 +355,6 @@ async def refine_boundaries(
             return False  # 0.95-1.1：正常陆地边缘 → 保持
 
         try:
-            rad = math.radians(ang)
             lng, lat = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
             info = await client.walking_direction((center_lat, center_lng), (lat, lng))
             t = float(info["duration_s"])

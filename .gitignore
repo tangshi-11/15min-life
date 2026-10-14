@@ -18,6 +18,7 @@ logs/
 
 # 本地诊断脚本与临时输出（不入库）
 backend/_diag_*
+backend/_*.py
 backend/_pytest*.txt
 backend/server*.log
 backend/_*.txt

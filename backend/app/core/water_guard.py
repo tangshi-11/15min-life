@@ -175,9 +175,7 @@ class WaterGuard:
                 if point_in_polygon(lng, lat, poly):
                     # 距岸线边界 ≥ margin 才算"开阔水面"；岸边缓冲带（绿道/步道）
                     # 判定为陆地保留（OSM 岸线常有外扩误差，默认岸边 300m 内不轻易判水）
-                    if point_edge_distance_m(lng, lat, poly) >= margin:
-                        return True
-                    return False
+                    return point_edge_distance_m(lng, lat, poly) >= margin
         return False
 
     async def _polygons_overpass_cached(self, center_ll: tuple[float, float]) -> list[list[tuple[float, float]]]:
