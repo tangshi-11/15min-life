@@ -1,5 +1,6 @@
 """本地启动入口：python run.py（等价于 uvicorn app.main:app --port 8000）"""
 import logging
+
 import uvicorn
 
 logging.basicConfig(

@@ -1,11 +1,9 @@
 """WaterGuard 水域仲裁单元测试。"""
-import asyncio
 import json
 import tempfile
 from pathlib import Path
 
 import pytest
-
 from app.core.water_guard import WaterGuard, point_in_polygon, wgs84_to_bd09
 
 
