@@ -177,17 +177,17 @@ class _WaterGarbageClient:
 
 @pytest.mark.asyncio
 async def test_refine_inward_clamp_on_water_guard():
-    """复核超时内缩后仍≥500m + 水域确认判水 → 贴岸 clamp 300m（湖面直线口径残留）。
+    """复核超时内缩后仍≥500m + 水域确认判水 → 贴多边形边界收缩（bd - edge）。
     实测滇池北侧：directionlite 对近岸水面 500-1200m 返回近似直线耗时≤阈值被当可达，
-    复核超时内缩后边界仍大，需 OSM 水体数据二次确认判水后贴岸。"""
+    复核超时内缩后边界仍大，需 OSM 水体数据二次确认判水后贴岸（岸线位置而非固定 300m）。"""
     o = (25.0406, 102.7146)
-    # 1500m 复核超时；750m 处可达：二分后 best≈750（≥500）→ water_guard 判水 → clamp 300
+    # 1500m 复核超时；750m 处可达：二分后 best≈750（≥500）→ water_guard 判水 → 贴岸收缩
     client = _FakeClient(sec_at=lambda d: d * 0.8 if d <= 800.0 else 1800.0 + d)
     wg = _WaterGuardMock(in_water=True)
     bounds = [(0.0, 1500.0)]
     out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10, water_guard=wg)
     (_, ref) = out[0]
-    assert ref <= 300.0, "水域确认判水后应贴岸 clamp 300m"
+    assert ref < 600.0, "水域确认判水后应贴多边形边界收缩（bd - edge）"
 
 
 @pytest.mark.asyncio
@@ -209,11 +209,25 @@ async def test_refine_reachable_water_clamp():
     需统一水域确认后贴岸排除湖面。"""
     o = (25.0406, 102.7146)
     client = _FakeClient(sec_at=lambda d: 500.0 if d <= 958 else 1800.0 + d)
-    wg = _WaterGuardMock(in_water=True)
+    wg = _WaterGuardMock(in_water=True, edge=700.0)  # 判水点到岸线 700m → 贴岸 958-700≈258m
     bounds = [(0.0, 958.0)]
     out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10, water_guard=wg)
     (_, ref) = out[0]
-    assert ref <= 300.0, "复核可达但水域确认判水应贴岸 300m"
+    assert ref <= 300.0, "复核可达但水域确认判水应贴岸收缩（bd - edge）"
+
+
+@pytest.mark.asyncio
+async def test_refine_center_in_water_clamps_zero():
+    """中心点本身在水体多边形内（近岸/湿地，如滇池边房子湾）→ 判水方向完全不可达 bd=0。
+    解决残留："圈伸到水上"——中心点在水边时，固定 300m/贴岸 bd-edge 的边界点
+    仍整段落在水面内（本地实测房子湾 19 个判水方向 300m 处全部 in_water=True）。"""
+    o = (24.883241, 102.785237)
+    client = _FakeClient(sec_at=lambda d: 500.0 if d <= 958 else 1800.0 + d)
+    wg = _WaterGuardMock(in_water=True, edge=500.0, center_in_water=True)
+    bounds = [(0.0, 958.0)]
+    out = await isochrone.refine_boundaries(o[0], o[1], bounds, client, 900.0, 100.0, 2000.0, max_refines=10, water_guard=wg)
+    (_, ref) = out[0]
+    assert ref == 0.0, "中心点在水域内时判水方向应完全不可达（bd=0），不再伸到水上"
 
 
 @pytest.mark.asyncio
@@ -245,13 +259,21 @@ async def test_refine_garbage_all_junk_keeps():
 
 
 class _WaterGuardMock:
-    """水域仲裁 mock：可指定返回水域/陆地。"""
+    """水域仲裁 mock：可指定返回水域/陆地、判水点到岸线距离 edge（贴岸收缩用）、
+    以及中心点自身是否在水域内（近岸/湿地场景 → 判水方向完全不可达 bd=0）。"""
 
-    def __init__(self, in_water: bool):
+    def __init__(self, in_water: bool, edge: float = 500.0, center_in_water: bool = False):
         self._in_water = in_water
+        self._edge = edge
+        self._center_in_water = center_in_water
 
     async def is_water(self, center_ll, point_ll, margin_m: float | None = None):
         return self._in_water
+
+    async def is_water_with_edge(self, center_ll, point_ll, margin_m: float | None = None):
+        if center_ll == point_ll:
+            return self._center_in_water, 0.0
+        return self._in_water, (self._edge if self._in_water else 0.0)
 
 
 @pytest.mark.asyncio

@@ -166,6 +166,12 @@ class WaterGuard:
 
     def _is_water_sync(self, center_ll: tuple[float, float], point_ll: tuple[float, float],
                        margin_m: float | None = None) -> bool:
+        return self._is_water_sync_with_edge(center_ll, point_ll, margin_m)[0]
+
+    def _is_water_sync_with_edge(self, center_ll: tuple[float, float], point_ll: tuple[float, float],
+                                 margin_m: float | None = None) -> tuple[bool, float]:
+        """同 _is_water_sync，额外返回判水点到水体多边形边界的最短距离（米）。
+        等时圈判水方向据此"贴岸收缩"：新边界 ≈ bd - edge（岸线沿方向近似位置）。"""
         lat, lng = point_ll
         margin = self.margin_m if margin_m is None else margin_m
         # 环 bbox 粗筛 + 射线法直接遍历（数千个环，每点判断 < 1ms）
@@ -175,8 +181,26 @@ class WaterGuard:
                 if point_in_polygon(lng, lat, poly):
                     # 距岸线边界 ≥ margin 才算"开阔水面"；岸边缓冲带（绿道/步道）
                     # 判定为陆地保留（OSM 岸线常有外扩误差，默认岸边 300m 内不轻易判水）
-                    return point_edge_distance_m(lng, lat, poly) >= margin
-        return False
+                    edge = point_edge_distance_m(lng, lat, poly)
+                    return edge >= margin, edge
+        return False, 0.0
+
+    async def is_water_with_edge(self, center_ll: tuple[float, float], point_ll: tuple[float, float],
+                                 margin_m: float | None = None) -> tuple[bool, float]:
+        """同 is_water，额外返回判水点到多边形边界的最短距离（米）。
+        等时圈水域仲裁用它"贴岸收缩"（新边界 ≈ bd - edge），解决固定 300m 缓冲
+        在近岸中心点下仍整段落在水面内导致的"圈伸到水上"残留。"""
+        if not self.enabled:
+            return True, 0.0
+        try:
+            if self._local_polys:
+                return await asyncio.to_thread(self._is_water_sync_with_edge, center_ll, point_ll, margin_m)
+            # 无本地数据 → Overpass 兜底（不提供 edge，返回 0）
+            in_water = await self.is_water(center_ll, point_ll, margin_m)
+            return in_water, 0.0
+        except Exception as exc:
+            logger.warning("水域仲裁失败，按水域保守处理：%s", exc)
+            return True, 0.0
 
     async def _polygons_overpass_cached(self, center_ll: tuple[float, float]) -> list[list[tuple[float, float]]]:
         if self.session is None:

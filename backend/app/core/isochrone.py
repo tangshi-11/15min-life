@@ -269,6 +269,16 @@ async def refine_boundaries(
     """
     if not boundaries:
         return boundaries
+    # 中心点自身水域判定（贴岸基准）：中心点落在水体多边形内（近岸/湿地，如滇池边房子湾）
+    # 时，判水方向从"水面内"出发，贴 bd-edge/固定缓冲仍会整段伸到水上；此时判水方向
+    # 完全不可达（bd=0）。常规陆上中心点（水体多边形外）不受影响，仍用 bd-edge 贴岸。
+    center_in_water = False
+    if water_guard is not None:
+        try:
+            center_in_water, _ = await water_guard.is_water_with_edge(
+                (center_lat, center_lng), (center_lat, center_lng), margin_m=0.0)
+        except Exception:
+            center_in_water = False
     # 只复核"采样边界足够大"的方向（默认 ≥600m）：
     # 批量接口(routematrix)对水域/异常点有直线口径误差，会把湖面/河道方向的可达边界推得过远；
     # 边界 <600m 的方向即使有水域误差也只影响贴岸 ~600m，视觉可忽略，跳过可大幅降低
@@ -386,12 +396,14 @@ async def refine_boundaries(
                     kept_by_probe = True
                 elif water_guard is not None and bd >= 500.0:
                     # 内缩后仍≥500m：可能是水面"直线口径"残留，用 OSM 水体数据确认：
-                    # 判水则贴岸 clamp 300m。
+                    # 判水则贴多边形边界收缩（bd - edge ≈ 岸线位置），而非固定 300m
+                    # （近岸中心点下 300m 缓冲仍整段落在水面内 → "圈伸到水上"）。
                     try:
                         blng_, blat_ = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
-                        in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_), margin_m=0.0)
+                        in_water, edge = await water_guard.is_water_with_edge(
+                            (center_lat, center_lng), (blat_, blng_), margin_m=0.0)
                         if in_water:
-                            bd = min(bd, 300.0)
+                            bd = 0.0 if center_in_water else min(bd, max(30.0, bd - edge))
                     except Exception as exc:
                         logger.warning("方向 %.1f° 水域复核失败，保持内缩边界：%s", ang, exc)
             elif t < limit_s * 0.9:
@@ -416,15 +428,18 @@ async def refine_boundaries(
         except Exception as exc:
             logger.warning("方向 %.1f° 单点复核失败，保持原边界：%s", ang, exc)  # 安全降级
         # 统一水域确认（探测保留的绿道豁免）：复核可达保留/外扩的方向若最终边界≥500m，
-        # 用 OSM 水体数据二次确认，判水则贴岸 300m。解决 directionlite 对近岸水面
-        # 500-1200m 返回"近似直线耗时≤阈值"被当可达的盖水残留（实测滇池北侧 958m）。
+        # 用 OSM 水体数据二次确认，判水则贴多边形边界收缩（bd - edge ≈ 岸线位置）。
+        # 解决 directionlite 对近岸水面 500-1200m 返回"近似直线耗时≤阈值"被当可达的盖水残留
+        # （实测滇池北侧 958m）；贴岸收缩同时解决固定 300m 缓冲在近岸中心点下仍伸到水面。
         if not kept_by_probe and water_guard is not None and bd >= 500.0:
             try:
                 blng_, blat_ = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
-                in_water = await water_guard.is_water((center_lat, center_lng), (blat_, blng_), margin_m=0.0)
-                logger.info("水域确认 方向 %.1f° bd=%.0fm kept=%s in_water=%s", ang, bd, kept_by_probe, in_water)
+                in_water, edge = await water_guard.is_water_with_edge(
+                    (center_lat, center_lng), (blat_, blng_), margin_m=0.0)
+                logger.info("水域确认 方向 %.1f° bd=%.0fm kept=%s in_water=%s edge=%.0fm center_water=%s",
+                            ang, bd, kept_by_probe, in_water, edge, center_in_water)
                 if in_water:
-                    bd = min(bd, 300.0)
+                    bd = 0.0 if center_in_water else min(bd, max(30.0, bd - edge))
             except Exception as exc:
                 logger.warning("方向 %.1f° 统一水域复核失败，保持边界：%s", ang, exc)
         out.append((ang, bd))
