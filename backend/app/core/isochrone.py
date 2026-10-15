@@ -394,8 +394,9 @@ async def refine_boundaries(
                 #   0.95-1.1 正常陆地边缘 → 保持
                 if await _apply_probe_arbitration():
                     kept_by_probe = True
-                elif water_guard is not None and bd >= 500.0:
-                    # 内缩后仍≥500m：可能是水面"直线口径"残留，用 OSM 水体数据确认：
+                elif water_guard is not None and (bd >= 500.0 or center_in_water):
+                    # 内缩后仍较大（或中心点本身在水域内——任何复核后边界都需水域确认）：
+                    # 可能是水面"直线口径"残留，用 OSM 水体数据确认：
                     # 判水则贴多边形边界收缩（bd - edge ≈ 岸线位置），而非固定 300m
                     # （近岸中心点下 300m 缓冲仍整段落在水面内 → "圈伸到水上"）。
                     try:
@@ -431,7 +432,7 @@ async def refine_boundaries(
         # 用 OSM 水体数据二次确认，判水则贴多边形边界收缩（bd - edge ≈ 岸线位置）。
         # 解决 directionlite 对近岸水面 500-1200m 返回"近似直线耗时≤阈值"被当可达的盖水残留
         # （实测滇池北侧 958m）；贴岸收缩同时解决固定 300m 缓冲在近岸中心点下仍伸到水面。
-        if not kept_by_probe and water_guard is not None and bd >= 500.0:
+        if not kept_by_probe and water_guard is not None and (bd >= 500.0 or center_in_water):
             try:
                 blng_, blat_ = offset_lnglat(center_lng, center_lat, bd * math.sin(rad), bd * math.cos(rad))
                 in_water, edge = await water_guard.is_water_with_edge(
